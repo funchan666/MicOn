@@ -20,63 +20,45 @@ struct HomeView: View {
     @State private var showingLinkGuide = false
     @State private var showingGuide = false
     @State private var showingJournal = false
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var takePlayer = PlaybackController()
+    @State private var listeningFileID: UUID?
+    @State private var reviewingTake: PracticeRecording?
+    @State private var openLessonFeedAfterDismissal = false
+    @State private var showingLink = false
+    @State private var pendingLinkSearch: LessonSearch?
+    @State private var composerError: String?
     @FocusState private var focused: Bool
     var body: some View {
         let request = ChannelRequest(links: commerce.release?.lcList?["us"] ?? [], attempt: channelRetry)
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(spacing: 10) {
-                    Text(verbatim: "MicOn").font(.booth(.title3, display: true))
-                        .foregroundStyle(MicOnStyle.paper).accessibilityAddTraits(.isHeader)
-                    Spacer()
-                    Button(LocalizedStringKey(commerce.premium ? "PLUS" : "Get Plus")) { paywall = true }
-                        .buttonStyle(MatteActionStyle())
-                    IconButton(symbol: .settings, label: "Open Me and account settings", action: openAccount)
-                }
-                VStack(spacing: 10) {
-                    BoothBanner()
-                    linkComposer
-                }
-                if let error {
-                    MessagePanel(title: "Couldn’t load lesson collections", message: error, actionTitle: "Try again") {
-                        channelRetry += 1
-                    }
-                }
-                if api.session == nil { ConnectionPanel() }
-                ActionButton(title: "Watch tutorials", primary: false, action: discover)
-                recentLinks
-                VStack(alignment: .leading, spacing: 10) {
-                    SectionLabel(title: "Between songs")
-                    VocalPracticeEntry { showingJournal = true }
-                    listenBack
-                    VocalGuideEntry(compact: true) { showingGuide = true }
-                }
-                if !channels.isEmpty {
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            LocalizedText("Karaoke lesson collections").font(.booth(.headline))
-                            LocalizedText("Pick a technique and practise it on a familiar song.").font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                        BoothArtwork(kind: .notebook, height: 76).frame(width: 114)
-                    }
-                    ForEach(Array(channels.enumerated()), id: \.offset) { _, item in
-                        if let info = item.extraInfo, let title = info.channelName, let short = info.externalLinks {
-                            Button { channel = ChannelRoute(link: short, title: title) } label: {
-                                HStack(spacing: 14) {
-                                    MediaCover(url: WebAddress.media(item.shortCover), folder: false).frame(width: 62, height: 72).clipShape(RoundedRectangle(cornerRadius: 12))
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(verbatim: title).font(.booth(.headline)).lineLimit(2)
-                                        if let count = info.videoFileCount { LocalizedText("\(count) videos").font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary) }
-                                    }
-                                    Spacer()
-                                }
-                            }.buttonStyle(PressStyle())
-                        }
-                    }
-                }
-            }.miconPage()
-        }.miconScreenBackground().scrollDismissesKeyboard(.interactively)
-            .dismissKeyboardOnOutsideTap($focused, scope: "home-link-input")
+            VStack(spacing: 0) {
+                listeningCover
+                VStack(alignment: .leading, spacing: 24) {
+                    lessonShortcut
+                    recentTakesSection
+                    practiceShortcuts
+                    connection
+                    techniqueQueue
+                    recentLinks
+                }.miconPage()
+            }
+        }.scrollClipDisabled()
+            .miconScreenBackground().scrollDismissesKeyboard(.interactively)
+            .sheet(isPresented: $showingLink, onDismiss: openPendingLesson) {
+                VStack(spacing: 0) {
+                    SheetHeading(title: "Open a singing lesson") { showingLink = false }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            lessonMixer
+                            if let composerError { ErrorNote(message: composerError) }
+                            if api.session == nil { ConnectionPanel() }
+                        }.miconPage()
+                    }.scrollDismissesKeyboard(.interactively)
+                }.miconScreenBackground()
+                    .dismissKeyboardOnOutsideTap($focused, scope: "home-link-input")
+                    .sheet(isPresented: $showingLinkGuide) { LinkGuideSheet() }
+            }
             .sheet(item: $channel) { ChannelView(route: $0) }
             .fullScreenCover(item: $searchRequest) { request in
                 DiscoverView(initialSearch: request.query, canDismiss: true) { query, clip in
@@ -89,9 +71,20 @@ struct HomeView: View {
                     .presentationBackground(.clear)
             }
             .sheet(isPresented: $paywall) { MembershipView() }
-            .sheet(isPresented: $showingLinkGuide) { LinkGuideSheet() }
             .sheet(isPresented: $showingJournal) { VocalPracticeView() }
+            .sheet(item: $reviewingTake) { EditorSheet(initialMovie: $0) }
             .sheet(isPresented: $showingGuide) { VocalGuideView() }
+            .onDisappear { takePlayer.pause() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { takePlayer.pause() }
+            }
+            .onChange(of: api.session?.userId.value) { _, _ in takePlayer.pause() }
+            .onChange(of: library.movies) { _, movies in
+                if let listeningFileID, !movies.contains(where: { $0.id == listeningFileID }) {
+                    takePlayer.release()
+                    self.listeningFileID = nil
+                }
+            }
             .task(id: request) {
                 guard !Task.isCancelled else { return }
                 channels = []
@@ -105,76 +98,337 @@ struct HomeView: View {
                 }
             }
     }
-    private var linkComposer: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { lessonTitle; Spacer(minLength: 4); pasteButton }
-                VStack(alignment: .leading, spacing: 6) { lessonTitle; pasteButton }
+
+    private var listeningCover: some View {
+        StudioCover(artwork: "ListenCover", height: 222...458, ratio: 1.0) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                Spacer(minLength: 36)
+                CoverTitle(title: "Listen back", size: 66)
+                reviewAction
             }
-            HStack(spacing: 0) {
-                TextField("MicOn link or lesson code", text: $link, axis: .vertical)
-                    .lineLimit(1...3).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($focused).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.ink)
-                    .tint(MicOnStyle.ink)
-                    .padding(.leading, 14).padding(.vertical, 14)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel(LocalizedStringKey("MicOn link or lesson code"))
-                if !link.isEmpty {
-                    Button {
-                        link = ""
-                        focused = true
-                    } label: {
-                        Glyph(symbol: .close, size: 13, tint: MicOnStyle.ink.opacity(0.65))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(ComposerPressStyle())
-                        .accessibilityLabel(LocalizedStringKey("Clear link"))
-                        .accessibilityIdentifier("home.clearLink")
-                }
+        }
+    }
+
+    private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                wordmark
+                Spacer(minLength: 8)
+                headerActions
             }
-                // Link input and its clear action stay together, including when
-                // the outside-tap handler decides whether to dismiss the keyboard.
-                .padding(.trailing, link.isEmpty ? 14 : 6)
-                .environment(\.layoutDirection, .leftToRight)
-                .background(Color.white.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
-                .environment(\.colorScheme, .light)
-                .keyboardInputRegion("home-link-input")
-            Button(action: resolve) {
-                HStack(spacing: 10) {
-                    Glyph(symbol: .play, size: 16, tint: MicOnStyle.ink)
-                    LocalizedText("Open lesson").font(.booth(.headline, display: true))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, minHeight: 54)
-                    .foregroundStyle(MicOnStyle.ink)
-                    .background(canOpenLink ? MicOnStyle.accent : MicOnStyle.mist, in: Capsule())
+            VStack(alignment: .leading, spacing: 6) {
+                wordmark
+                headerActions
+            }
+        }
+    }
+
+    private var wordmark: some View {
+        HStack(spacing: 8) {
+            TintedArtwork(name: "TabHome", tint: MicOnStyle.accent).frame(width: 27, height: 21)
+            Text(verbatim: "MicOn").font(.booth(.headline, weight: .bold))
+                .foregroundStyle(MicOnStyle.paper)
+        }.fixedSize()
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 6) {
+            Button {
+                takePlayer.pause()
+                paywall = true
+            } label: {
+                LocalizedText(commerce.premium ? "Plus" : "Get Plus")
+                    .font(.booth(.footnote, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .foregroundStyle(MicOnStyle.paper)
+                    .studioGlass(in: Capsule())
                     .contentShape(Rectangle())
-            }.buttonStyle(ComposerPressStyle()).disabled(!canOpenLink)
-                .accessibilityIdentifier("home.openLesson")
-            HStack(alignment: .center, spacing: 12) {
-                allowanceLabel
+            }.buttonStyle(PressStyle())
+            IconButton(symbol: .settings, label: "Open Me and account settings") {
+                takePlayer.pause()
+                openAccount()
+            }.studioGlass(in: Capsule())
+        }
+    }
+
+    @ViewBuilder private var connection: some View {
+        if api.session == nil { ConnectionPanel(showsArtwork: false) }
+        if let error {
+            MessagePanel(title: "Couldn’t load lesson collections", message: error, actionTitle: "Try again") {
+                channelRetry += 1
+            }
+        }
+    }
+
+    private var reviewAction: some View {
+        Button {
+            takePlayer.pause()
+            if let movie = library.movies.first(where: { $0.id == listeningFileID }) {
+                reviewingTake = movie
+            } else {
+                openTools()
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Glyph(symbol: .edit, size: 19, tint: MicOnStyle.ink)
+                LocalizedText("Review a singing take").font(.booth(.subheadline, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 17).padding(.vertical, 11)
+            .frame(minHeight: 52)
+            .foregroundStyle(MicOnStyle.ink)
+            .background(MicOnStyle.accent, in: Capsule())
+            .contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityIdentifier("home.reviewTake")
+    }
+
+    private var lessonShortcut: some View {
+        Button {
+            takePlayer.pause()
+            showingLink = true
+        } label: {
+            HStack(spacing: 13) {
+                Glyph(symbol: .link, size: 18, tint: MicOnStyle.accent)
+                    .frame(width: 40, height: 40)
+                    .background(MicOnStyle.accent.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    LocalizedText("Open a singing lesson").font(.booth(.headline))
+                        .foregroundStyle(MicOnStyle.paper)
+                    LocalizedText("MicOn link or lesson code").font(.booth(.footnote))
+                        .foregroundStyle(MicOnStyle.secondary)
+                }.fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button { showingLinkGuide = true } label: {
-                    LocalizedText("How to").font(.booth(.caption, weight: .semibold))
-                        .underline().foregroundStyle(MicOnStyle.ink)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(minWidth: 44, minHeight: 44)
+                Glyph(symbol: .back, size: 12, tint: MicOnStyle.accent).rotationEffect(.degrees(180))
+            }.padding(12).frame(minHeight: 64)
+                .studioGlass(in: RoundedRectangle(cornerRadius: 22))
+                .contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityIdentifier("home.showLink")
+    }
+
+    private var recentTakesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LocalizedText("Recent imports").font(.booth(.title3, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            if let active = library.movies.first(where: { $0.id == listeningFileID }) {
+                if !recentTakes.contains(where: { $0.id == active.id }) {
+                    takeButton(active)
+                }
+                if let message = takePlayer.error {
+                    ErrorNote(message: message)
+                } else if takePlayer.isLoading {
+                    LocalizedText("Preparing preview…").font(.booth(.caption))
+                        .foregroundStyle(MicOnStyle.secondary)
+                }
+            }
+            if recentTakes.isEmpty {
+                LocalizedText("Choose a clip from your device. We’ll keep your original untouched.")
+                    .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(recentTakes) { movie in
+                        Divider().overlay(MicOnStyle.line)
+                        takeButton(movie)
+                    }
+                }
+            }
+        }
+    }
+
+    private var recentTakes: [PracticeRecording] {
+        Array(library.movies.filter { !$0.isExport }.prefix(5))
+    }
+
+    private var practiceShortcuts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(MicOnStyle.line)
+            Button {
+                takePlayer.pause()
+                showingJournal = true
+            } label: {
+                HStack(spacing: 13) {
+                    Glyph(symbol: .edit, size: 19, tint: MicOnStyle.accent).frame(width: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        LocalizedText("Singing log").font(.booth(.headline))
+                        LocalizedText("Keep a record of phrasing, key and how each take felt.")
+                            .font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
+                    }.fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Glyph(symbol: .back, size: 12, tint: MicOnStyle.accent).rotationEffect(.degrees(180))
+                }.padding(.vertical, 12).frame(minHeight: 50)
+                    .foregroundStyle(MicOnStyle.paper).contentShape(Rectangle())
+            }.buttonStyle(PressStyle()).accessibilityIdentifier("practice.openJournal")
+            Divider().overlay(MicOnStyle.line)
+            VocalGuideEntry(compact: true) {
+                takePlayer.pause()
+                showingGuide = true
+            }
+            Divider().overlay(MicOnStyle.line)
+        }
+    }
+
+    private func takeButton(_ movie: PracticeRecording) -> some View {
+        let playing = listeningFileID == movie.id && takePlayer.intendsPlayback
+        return Button { playTake(movie) } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: movie.title).font(.booth(.headline))
+                        .fixedSize(horizontal: false, vertical: true)
+                    LocalizedDateText(date: movie.date).font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Glyph(symbol: playing ? .pause : .play, size: 17, tint: playing ? MicOnStyle.ink : MicOnStyle.accent)
+                    .frame(width: 44, height: 44)
+                    .background(playing ? MicOnStyle.accent : MicOnStyle.surface, in: Circle())
+            }.padding(.vertical, 6).contentShape(Rectangle())
+        }.buttonStyle(PressStyle())
+            .accessibilityLabel(Text(verbatim: movie.title))
+            .accessibilityHint(Text(playing ? "Pause" : "Play"))
+            .accessibilityAddTraits(listeningFileID == movie.id ? .isSelected : [])
+    }
+
+    private func playTake(_ movie: PracticeRecording) {
+        let url = library.url(for: movie)
+        if takePlayer.loadedURL == url, takePlayer.error == nil {
+            takePlayer.toggle()
+        } else {
+            listeningFileID = movie.id
+            takePlayer.load(url, autoplay: true)
+        }
+    }
+
+    @ViewBuilder private var techniqueQueue: some View {
+        if !channels.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                LocalizedText("Karaoke lesson collections").font(.booth(.title2, display: true))
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(channels.indices, id: \.self) { index in
+                    let item = channels[index]
+                    if let info = item.extraInfo, let title = info.channelName, let short = info.externalLinks {
+                        Divider().overlay(MicOnStyle.line)
+                        Button {
+                            takePlayer.pause()
+                            channel = ChannelRoute(link: short, title: title)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Glyph(symbol: .play, size: 14, tint: MicOnStyle.accent)
+                                Text(verbatim: title).font(.booth(.headline))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if let count = info.videoFileCount {
+                                    Text(count, format: .number).font(.booth(.caption)).monospacedDigit()
+                                        .foregroundStyle(MicOnStyle.secondary)
+                                        .accessibilityLabel(Text(verbatim: L10n.display("\(count) videos")))
+                                }
+                            }.frame(minHeight: 46).contentShape(Rectangle())
+                        }.buttonStyle(PressStyle())
+                    }
+                }
+            }
+        }
+    }
+
+    private func openPendingLesson() {
+        composerError = nil
+        if openLessonFeedAfterDismissal {
+            openLessonFeedAfterDismissal = false
+            discover()
+            return
+        }
+        guard let request = pendingLinkSearch else { return }
+        pendingLinkSearch = nil
+        searchRequest = request
+    }
+
+    private var lessonMixer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            linkField
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { playLesson; pasteButton }
+                VStack(alignment: .leading, spacing: 8) { playLesson; pasteButton }
+            }
+            allowanceLabel
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { lessonHelp; lessonFeed }
+                VStack(alignment: .leading, spacing: 8) { lessonHelp; lessonFeed }
+            }
+        }.padding(.vertical, 4)
+    }
+
+    private var lessonHelp: some View {
+        Button { showingLinkGuide = true } label: {
+            LocalizedText("How to").font(.booth(.footnote, weight: .semibold))
+                .foregroundStyle(MicOnStyle.accent)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }.buttonStyle(PressStyle()).accessibilityIdentifier("home.linkHelp")
+    }
+
+    private var lessonFeed: some View {
+        Button {
+            openLessonFeedAfterDismissal = true
+            showingLink = false
+        } label: {
+            LocalizedText("Watch tutorials").font(.booth(.subheadline, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .underline().foregroundStyle(MicOnStyle.accent)
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }.buttonStyle(PressStyle())
+    }
+
+    private var playLesson: some View {
+        Button(action: resolve) {
+            HStack(spacing: 10) {
+                Glyph(symbol: .play, size: 16, tint: MicOnStyle.ink)
+                LocalizedText("Open lesson").font(.booth(.headline, display: true))
+                    .fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 14).padding(.vertical, 8).frame(minHeight: 48)
+                .foregroundStyle(MicOnStyle.ink)
+                .background(MicOnStyle.accent, in: Capsule())
+                .contentShape(Rectangle())
+        }.buttonStyle(ComposerPressStyle()).disabled(!canOpenLink)
+            .accessibilityIdentifier("home.openLesson")
+    }
+
+    private var linkField: some View {
+        HStack(spacing: 0) {
+            TextField("MicOn link or lesson code", text: $link, axis: .vertical)
+                .lineLimit(1...3).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .focused($focused).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.paper)
+                .tint(MicOnStyle.paper)
+                .padding(.leading, 14).padding(.vertical, 14)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(LocalizedStringKey("MicOn link or lesson code"))
+            if !link.isEmpty {
+                Button {
+                    link = ""
+                    composerError = nil
+                    focused = true
+                } label: {
+                    Glyph(symbol: .close, size: 13, tint: MicOnStyle.paper)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }.buttonStyle(ComposerPressStyle())
-                    .accessibilityIdentifier("home.linkHelp")
+                    .accessibilityLabel(LocalizedStringKey("Clear link"))
+                    .accessibilityIdentifier("home.clearLink")
             }
-        }.padding(20).background(MicOnStyle.paper, in: RoundedRectangle(cornerRadius: 26))
+        }
+            // Link input and its clear action stay together, including when
+            // the outside-tap handler decides whether to dismiss the keyboard.
+            .padding(.trailing, link.isEmpty ? 14 : 6)
+            .environment(\.layoutDirection, .leftToRight)
+            .background(MicOnStyle.raised, in: RoundedRectangle(cornerRadius: 14))
+            .keyboardInputRegion("home-link-input")
     }
-    private var lessonTitle: some View {
-        LocalizedText("Open a singing lesson").font(.booth(.title3, display: true))
-            .foregroundStyle(MicOnStyle.ink).fixedSize(horizontal: false, vertical: true)
-    }
+
     private var canOpenLink: Bool { searchRequest == nil && link.nilIfBlank != nil }
     @ViewBuilder private var allowanceLabel: some View {
         if api.session != nil {
             LocalizedText(quota.usage == nil ? "Loading…" : commerce.premium || quota.unlimited ? "Unlimited viewing today" : "\(quota.watchesLeft) views left today")
-                .font(.booth(.caption)).foregroundStyle(MicOnStyle.paperSecondary)
+                .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -195,6 +449,7 @@ struct HomeView: View {
             showLinkFailure("Copy a MicOn link or lesson code first, then tap Paste.")
             return
         }
+        composerError = nil
         link = text
     }
     @ViewBuilder private var recentLinks: some View {
@@ -221,31 +476,26 @@ struct HomeView: View {
             }
         }
     }
-    private var listenBack: some View {
-        Button(action: openTools) {
-            HStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    LocalizedText("Listen back").font(.booth(.title3, display: true))
-                    LocalizedText("Review the timing and sound of your take").font(.booth(.caption))
-                        .foregroundStyle(MicOnStyle.secondary)
-                }.fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                BoothArtwork(kind: .notebook, height: 62).frame(width: 62)
-                    .clipShape(.rect(cornerRadius: 12))
-            }.padding(12).frame(minHeight: 52).foregroundStyle(MicOnStyle.paper)
-                .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .contentShape(Rectangle())
-        }.buttonStyle(PressStyle())
-    }
     private func resolve() {
         guard let text = link.nilIfBlank, searchRequest == nil else { return }
+        takePlayer.pause()
         focused = false
         guard api.session != nil else { showLinkFailure("Your connection is not ready yet. Please try again."); return }
         // Preserve exactly what was entered. Search owns loading, errors and cursor
         // pagination; do not fall back to the old landing-page resolver.
-        searchRequest = LessonSearch(query: text)
+        let request = LessonSearch(query: text)
+        if showingLink {
+            pendingLinkSearch = request
+            showingLink = false
+        } else {
+            searchRequest = request
+        }
     }
     private func showLinkFailure(_ message: String) {
+        if showingLink {
+            composerError = message
+            return
+        }
         linkFailure = message
         showingLinkFailure = true
     }

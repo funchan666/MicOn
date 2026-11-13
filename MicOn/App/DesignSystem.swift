@@ -67,27 +67,60 @@ struct GuideArtwork: View {
     }
 }
 
-struct BoothBanner: View {
-    @Environment(\.dynamicTypeSize) private var typeSize
+struct StudioCover<Content: View>: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    let artwork: String
+    var height: ClosedRange<CGFloat> = 214...320
+    var ratio: CGFloat = 1.25
+    var backdrop = MicOnStyle.background
+    @ViewBuilder var content: () -> Content
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            LocalizedText("Find your karaoke voice.")
-                .font(.booth(.largeTitle, display: true)).foregroundStyle(MicOnStyle.paper)
-                .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
-            LocalizedText("Work on a phrase, listen back, and take it to the next chorus.")
-                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.paper)
-                .fixedSize(horizontal: false, vertical: true)
-        }.padding(22).frame(maxWidth: .infinity, minHeight: 244, alignment: .bottomLeading)
-            .background {
-                GeometryReader { geometry in
-                    Image("HeroBooth").resizable().scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .overlay {
-                            LinearGradient(colors: [.clear, MicOnStyle.background.opacity(typeSize.isAccessibilitySize ? 0.94 : 0.86)],
-                                           startPoint: .top, endPoint: .bottom)
-                        }.clipped()
-                }
-            }.clipShape(.rect(cornerRadius: 22))
+        let coverHeight = verticalSizeClass == .compact ? height.lowerBound...height.lowerBound : height
+        StudioCoverLayout(height: coverHeight, ratio: ratio) {
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .pageHorizontalMargins()
+                .padding(.vertical, 16)
+                .frame(maxWidth: 680)
+                .frame(maxWidth: .infinity)
+        }
+        .background {
+            GeometryReader { geometry in
+                Image(artwork).resizable().interpolation(.high).scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .overlay {
+                        LinearGradient(stops: [
+                            .init(color: .black.opacity(0.43), location: 0),
+                            .init(color: .clear, location: 0.23),
+                            .init(color: .clear, location: 0.46),
+                            .init(color: backdrop.opacity(0.64), location: 0.72),
+                            .init(color: backdrop, location: 1)
+                        ], startPoint: .top, endPoint: .bottom)
+                    }
+            }
+            .background(backdrop)
+            .ignoresSafeArea(.container, edges: [.top, .horizontal])
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct StudioCoverLayout: Layout {
+    let height: ClosedRange<CGFloat>
+    let ratio: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews[0].sizeThatFits(.unspecified).width
+        let contentHeight = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        let artworkHeight = min(max(width / ratio, height.lowerBound), height.upperBound)
+        return CGSize(width: width, height: max(artworkHeight, contentHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }
 
@@ -166,11 +199,12 @@ struct IconButton: View {
 
 struct PressStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(!isEnabled ? 0.55 : (configuration.isPressed ? 0.7 : 1))
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.98 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 // Compact controls keep their full localized label; enclosing layouts scroll or use ViewThatFits.
@@ -276,6 +310,9 @@ extension View {
     func miconScreenBackground(_ color: Color = MicOnStyle.background) -> some View {
         background { color.ignoresSafeArea(.container, edges: .all) }
     }
+    func studioGlass(in shape: some InsettableShape) -> some View {
+        modifier(StudioGlass(shape: shape))
+    }
     // A readable column follows the available container (outer or inner display) without resetting state.
     func miconPage() -> some View {
         pageHorizontalMargins().padding(.top, 16).padding(.bottom, 24)
@@ -288,6 +325,30 @@ extension View {
         } else {
             padding(.horizontal, 20)
         }
+    }
+}
+
+private struct StudioGlass<Surface: InsettableShape>: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let shape: Surface
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if reduceTransparency {
+                    shape.fill(MicOnStyle.raised)
+                } else {
+                    shape.fill(MicOnStyle.background.opacity(0.58))
+                        .background(.regularMaterial, in: shape)
+                }
+            }
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.08)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    lineWidth: 1
+                ).allowsHitTesting(false)
+            }
     }
 }
 struct MediaCover: View {

@@ -546,3 +546,15 @@
 "The distribution package does not exist" = "アプリの配信設定が見つかりません。";
 "Web search" = "ウェブ検索";
 "Opening page…" = "ページを開いています…";
+
+"Listening library" = "リスニングライブラリ";
+"Booth pass" = "歌唱ブースパス";
+
+"Listen back" = "聴き返す";
+"Singing log" = "歌唱記録";
+"Review a singing take" = "歌唱テイクを確認";
+"Open a singing lesson" = "歌のレッスンを開く";
+"Karaoke lesson collections" = "カラオケレッスン集";
+"Watch tutorials" = "チュートリアルを見る";
+"Play" = "再生";
+"Pause" = "一時停止";

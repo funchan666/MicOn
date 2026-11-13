@@ -12,6 +12,7 @@ struct MembershipView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var selectedID: String?
     @State private var attemptedPurchaseAction = false
     @State private var purchaseTask: Task<Void, Never>?
@@ -32,89 +33,12 @@ struct MembershipView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(spacing: 12) {
-                    BoothArtwork(kind: .pass, height: 136)
-                        .accessibilityHidden(true)
-                    LocalizedText(commerce.premium ? "More time on the floor." : "Keep the practice going.")
-                        .font(.booth(.title2, display: true))
-                        .foregroundStyle(MicOnStyle.paper)
-                    LocalizedText("Unlimited views, downloads and media exports.")
-                        .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
-
-                if exportRequired {
-                    LocalizedText("Export is included with Plus.")
-                        .font(.booth(.subheadline, weight: .semibold)).foregroundStyle(MicOnStyle.paper)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if commerce.premium {
-                    VStack(alignment: .leading, spacing: 10) {
-                        LocalizedText("Your membership is active").font(.booth(.headline))
-                        if let expiration = commerce.expiration {
-                            LocalizedText("Access through \(expiration.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))).")
-                                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                        }
-                    }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 22))
-                } else {
-                    if api.session == nil { ConnectionPanel() }
-                    VStack(spacing: 12) {
-                        ForEach(plans, id: \.productIdentifier) { plan in
-                            planRow(plan)
-                        }
-                    }
-                    if let error = commerce.plansError {
-                        ErrorNote(message: error)
-                        Button("Retry") { Task { await commerce.loadPlans() } }
-                            .buttonStyle(CompactActionStyle()).disabled(interactionLocked)
-                    }
-                    VStack(spacing: 12) {
-                        ActionButton(title: purchaseButtonTitle) { subscribe() }
-                            .disabled(interactionLocked || selectedPlan == nil)
-                            .accessibilityIdentifier("membership.subscribe")
-                        if purchasing {
-                            ProgressView().tint(MicOnStyle.accent).accessibilityHidden(true)
-                        }
-                    }
-                }
-
-                if attemptedPurchaseAction {
-                    if let error = commerce.error { ErrorNote(message: error) }
-                    if let message = commerce.message {
-                        LocalizedText(message).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.accent)
-                    }
-                }
-
-                if !exportRequired, !commerce.premium, api.session != nil { rewardOption }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    LocalizedText("Renews automatically. Cancel in your Apple account at least 24 hours before renewal.")
-                        .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ViewThatFits(in: .horizontal) {
-                        HStack(spacing: 16) {
-                            restoreLink
-                            PolicyLinks(compact: true)
-                        }
-                        VStack(alignment: .leading, spacing: 0) {
-                            restoreLink
-                            PolicyLinks(compact: true)
-                        }
-                    }
-                }
-
-            }.padding(.horizontal, 20).padding(.top, 4).padding(.bottom, 20)
-                .frame(maxWidth: 560).frame(maxWidth: .infinity)
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SheetHeading(title: "Plus") {
-                cancelRewardRequest()
-                dismiss()
+            VStack(spacing: 0) {
+                membershipIntro
+                membershipDetails
             }
-                .disabled(purchasing || ads.isPresenting).padding(.bottom, 8)
-                .miconScreenBackground()
         }
+        .scrollClipDisabled()
         .miconScreenBackground().foregroundStyle(.white)
         .task {
             async let rights: Void = commerce.refresh()
@@ -141,6 +65,55 @@ struct MembershipView: View {
         }
     }
 
+    private var membershipDetails: some View {
+        VStack(alignment: .leading, spacing: 20) {
+                if exportRequired {
+                    LocalizedText("Export is included with Plus.")
+                        .font(.booth(.subheadline, weight: .semibold)).foregroundStyle(MicOnStyle.paper)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if commerce.premium {
+                    VStack(alignment: .leading, spacing: 10) {
+                        LocalizedText("Your membership is active").font(.booth(.headline))
+                        if let expiration = commerce.expiration {
+                            LocalizedText("Access through \(expiration.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))).")
+                                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
+                        }
+                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MicOnStyle.raised, in: RoundedRectangle(cornerRadius: 16))
+                    renewalDisclosure
+                } else {
+                    if api.session == nil { ConnectionPanel(showsArtwork: false) }
+                    if !plans.isEmpty { planPicker }
+                    if let error = commerce.plansError {
+                        ErrorNote(message: error)
+                        Button("Retry") { Task { await commerce.loadPlans() } }
+                            .buttonStyle(CompactActionStyle()).disabled(interactionLocked)
+                    }
+                    renewalDisclosure
+                    VStack(spacing: 12) {
+                        purchaseAction
+                        if purchasing {
+                            loadingMark(width: 42)
+                        }
+                    }
+                }
+
+                restoreLink
+
+                if attemptedPurchaseAction {
+                    if let error = commerce.error { ErrorNote(message: error) }
+                    if let message = commerce.message {
+                        LocalizedText(message).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.accent)
+                    }
+                }
+
+                PolicyLinks(compact: true)
+
+                if !exportRequired, !commerce.premium, api.session != nil { rewardOption }
+        }.miconPage()
+    }
+
     private var purchaseButtonTitle: String {
         if commerce.loadingProducts || commerce.loadingPlans { return "Checking with Apple…" }
         if commerce.preparingPurchase { return "Preparing your subscription…" }
@@ -148,48 +121,93 @@ struct MembershipView: View {
         return "Subscribe"
     }
 
-    private func planRow(_ product: SKProduct) -> some View {
+    private var membershipIntro: some View {
+        StudioCover(artwork: "PlusArtwork", height: 218...366, ratio: 1.19) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    LocalizedText("Plus").font(.booth(.subheadline, weight: .bold))
+                        .foregroundStyle(MicOnStyle.paper)
+                    Spacer(minLength: 8)
+                    IconButton(symbol: .close, label: "Close") {
+                        cancelRewardRequest()
+                        dismiss()
+                    }
+                    .studioGlass(in: Circle())
+                    .disabled(purchasing || ads.isPresenting)
+                }
+                Spacer(minLength: 50)
+                CoverTitle(title: "Booth pass", size: 64)
+                LocalizedText("Unlimited views, downloads and media exports.")
+                    .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.paper)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var planPicker: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 275 : 142), spacing: 10, alignment: .top)],
+            alignment: .leading, spacing: 10
+        ) {
+            ForEach(plans, id: \.productIdentifier) { plan in
+                planOption(plan)
+            }
+        }
+    }
+
+    private func planOption(_ product: SKProduct) -> some View {
         let selected = selectedPlan?.productIdentifier == product.productIdentifier
         let price = commerce.price(product)
         let period = commerce.period(product, locale: locale)
-        let foreground = selected ? MicOnStyle.ink : MicOnStyle.paper
-        let secondary = selected ? MicOnStyle.paperSecondary : MicOnStyle.secondary
         return Button { selectedID = product.productIdentifier } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 20) {
-                    planName(product, selected: selected, foreground: foreground, secondary: secondary)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    TintedArtwork(name: "TabHome", tint: selected ? MicOnStyle.ink : MicOnStyle.accent)
+                        .frame(width: 23, height: 18)
+                        .frame(width: 37, height: 29)
+                        .background(selected ? MicOnStyle.accent : MicOnStyle.surface, in: Capsule())
                     Spacer(minLength: 0)
-                    planPrice(price, period: period, foreground: foreground, secondary: secondary)
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    planName(product, selected: selected, foreground: foreground, secondary: secondary)
-                    planPrice(price, period: period, foreground: foreground, secondary: secondary)
+                Text(verbatim: product.localizedTitle).font(.booth(.subheadline, weight: .semibold))
+                Text(verbatim: price).environment(\.layoutDirection, .leftToRight)
+                    .font(.booth(.title2, weight: .semibold)).monospacedDigit().foregroundStyle(MicOnStyle.accent)
+                LocalizedText("Billed every %@", period).font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
+            }.fixedSize(horizontal: false, vertical: true)
+                .padding(13).frame(maxWidth: .infinity, minHeight: 135, alignment: .topLeading)
+                .foregroundStyle(MicOnStyle.paper)
+                .studioGlass(in: RoundedRectangle(cornerRadius: 17))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 17).strokeBorder(selected ? MicOnStyle.accent : .clear)
+                        .allowsHitTesting(false)
                 }
-            }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background { BoothSurface(tone: selected ? .blush : .plum) }
-            .contentShape(.interaction, RoundedRectangle(cornerRadius: 22))
+                .contentShape(Rectangle())
         }.buttonStyle(PressStyle()).disabled(interactionLocked)
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityIdentifier("membership.plan.\(product.productIdentifier)")
     }
 
-    private func planName(_ product: SKProduct, selected: Bool, foreground: Color, secondary: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: product.localizedTitle).font(.booth(.headline)).foregroundStyle(foreground)
-            if selected {
-                LocalizedText("Selected").font(.booth(.caption)).foregroundStyle(secondary)
-            }
-        }.fixedSize(horizontal: false, vertical: true)
+    private var renewalDisclosure: some View {
+        LocalizedText("Renews automatically. Cancel in your Apple account at least 24 hours before renewal.")
+            .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func planPrice(_ price: String, period: String, foreground: Color, secondary: Color) -> some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            Text(verbatim: price).environment(\.layoutDirection, .leftToRight)
-                .font(.booth(.title2, weight: .bold)).foregroundStyle(foreground).fixedSize()
-            LocalizedText("Billed every %@", period).font(.booth(.caption)).foregroundStyle(secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private var purchaseAction: some View {
+        Button(action: subscribe) {
+            HStack(spacing: 10) {
+                Glyph(symbol: .sound, size: 18, tint: MicOnStyle.accent)
+                    .frame(width: 36, height: 36)
+                    .background(MicOnStyle.ink, in: Capsule()).accessibilityHidden(true)
+                LocalizedText(purchaseButtonTitle).font(.booth(.headline, display: true))
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .foregroundStyle(MicOnStyle.ink)
+                .background(MicOnStyle.accent, in: RoundedRectangle(cornerRadius: 18))
+                .contentShape(Rectangle())
+        }.buttonStyle(PressStyle())
+            .disabled(interactionLocked || selectedPlan == nil)
+            .accessibilityIdentifier("membership.subscribe")
     }
 
     private func subscribe() {
@@ -217,7 +235,7 @@ struct MembershipView: View {
             }
             if ads.busy {
                 HStack(spacing: 12) {
-                    ProgressView().tint(MicOnStyle.accent).accessibilityHidden(true)
+                    loadingMark(width: 28)
                     LocalizedText("Loading ad…").font(.booth(.footnote))
                     Spacer(minLength: 12)
                     Button("Cancel") { cancelRewardRequest() }
@@ -244,20 +262,34 @@ struct MembershipView: View {
         ads.cancelRewardLoading()
     }
 
+    private func loadingMark(width: CGFloat) -> some View {
+        Image("MicOnLoadingMark").renderingMode(.template).resizable().scaledToFit()
+            .foregroundStyle(MicOnStyle.accent)
+            .frame(width: width, height: 14)
+            .phaseAnimator([false, true]) { content, dimmed in
+                content.opacity(reduceMotion || scenePhase != .active ? 1 : (dimmed ? 0.35 : 1))
+            } animation: { _ in
+                reduceMotion || scenePhase != .active ? nil : .easeInOut(duration: 0.6)
+            }
+            .accessibilityHidden(true)
+    }
+
     private var restoreLink: some View {
         Button {
             attemptedPurchaseAction = true
             commerce.restore()
         } label: {
             LocalizedText("Restore purchases")
-                .font(.booth(.footnote, weight: .medium))
-                .foregroundStyle(MicOnStyle.accent)
-                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                .font(.booth(.subheadline, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .frame(minHeight: 44)
+                .foregroundStyle(MicOnStyle.accent)
+                .background(MicOnStyle.raised, in: Capsule())
                 .contentShape(Rectangle())
         }.disabled(interactionLocked).buttonStyle(PressStyle())
+            .accessibilityIdentifier("membership.restore")
     }
-
 }
 
 struct AccountView: View {
@@ -273,38 +305,36 @@ struct AccountView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                if let session = api.session {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline) {
-                            accountIdentity(session.userId.value)
-                            Spacer(minLength: 16)
-                            accountStatus
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            accountIdentity(session.userId.value)
-                            accountStatus
-                        }
-                    }
-                    membershipCard
-                    allowance
-                } else { ConnectionPanel() }
-                AccountSettingsSection()
-                LocalizedText("Version \(api.configuration.version)")
-                    .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-                    .frame(maxWidth: .infinity).padding(.top, 4)
+            VStack(spacing: 0) {
+                accountCover
+                VStack(alignment: .leading, spacing: 24) {
+                    if api.session != nil {
+                        membershipCard
+                        allowance
+                        Divider().overlay(MicOnStyle.line)
+                    } else { ConnectionPanel(showsArtwork: false) }
+                    AccountSettingsSection()
+                    LocalizedText("Version \(api.configuration.version)")
+                        .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
+                        .padding(.top, 4)
+                }.miconPage()
             }
-            .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 24)
-            .frame(maxWidth: 600).frame(maxWidth: .infinity)
-        }.miconScreenBackground().foregroundStyle(.white)
+        }.scrollClipDisabled()
+            .miconScreenBackground().foregroundStyle(.white)
             .sheet(isPresented: $paywall) { MembershipView() }
     }
 
-    private func accountIdentity(_ id: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            LocalizedText("Your practice space").font(.booth(.headline)).foregroundStyle(MicOnStyle.paper)
-            LocalizedText("ID · \(id)").font(.caption.monospaced()).foregroundStyle(MicOnStyle.secondary)
-                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+    private var accountCover: some View {
+        StudioCover(artwork: "AccountCover", height: 178...322, ratio: 1.26) {
+            VStack(alignment: .leading, spacing: 8) {
+                CoverTitle(title: "Your practice space", size: 55)
+                if let session = api.session {
+                    LocalizedText("ID · \(session.userId.value)").font(.booth(.footnote)).monospacedDigit()
+                        .foregroundStyle(MicOnStyle.secondary)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    accountStatus
+                }
+            }
         }
     }
 
@@ -316,25 +346,20 @@ struct AccountView: View {
 
     private var membershipCard: some View {
         Button { paywall = true } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    membershipCopy
-                    BoothArtwork(kind: .pass, height: 126).frame(width: 132)
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    BoothArtwork(kind: .pass, height: 100)
-                    membershipCopy
-                }
+            HStack(alignment: .center, spacing: 16) {
+                membershipCopy.frame(maxWidth: .infinity, alignment: .leading)
+                Glyph(symbol: .back, size: 16, tint: MicOnStyle.ink)
+                    .rotationEffect(.degrees(180))
             }
-            .padding(22).frame(maxWidth: .infinity, alignment: .leading)
-            .background(MicOnStyle.paper, in: RoundedRectangle(cornerRadius: 24))
-            .contentShape(.interaction, RoundedRectangle(cornerRadius: 24))
+            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            .background(MicOnStyle.paper, in: RoundedRectangle(cornerRadius: 20))
+            .contentShape(.interaction, RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(PressStyle()).disabled(unavailable)
             .accessibilityIdentifier("account.membership")
     }
 
     private var membershipCopy: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 7) {
             LocalizedText(commerce.premium ? "Your all-access pass." : "Go further with Plus.")
                 .font(.booth(.title3, weight: .semibold)).foregroundStyle(MicOnStyle.ink)
             LocalizedText("Unlimited views. Unlimited downloads.")
@@ -342,7 +367,6 @@ struct AccountView: View {
                 .fixedSize(horizontal: false, vertical: true)
             LocalizedText(commerce.premium ? "Manage membership" : "Explore plans")
                 .font(.booth(.footnote, weight: .semibold)).foregroundStyle(MicOnStyle.ink)
-                .padding(.top, 8)
         }.fixedSize(horizontal: false, vertical: true)
     }
 

@@ -125,30 +125,28 @@ struct DiscoverView: View {
     }
     var body: some View {
         ZStack(alignment: .top) {
-            if api.session == nil {
+            if api.session == nil || feed.clips.isEmpty {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        BoothArtwork(kind: .lesson, height: 208)
-                        LocalizedText("Connecting your lesson feed…")
-                            .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                        ConnectionPanel()
-                    }.miconPage()
-                }
-            } else if feed.clips.isEmpty {
-                VStack(spacing: 0) {
-                    feedHeader
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            BoothArtwork(kind: .lesson, height: 208)
-                            MessagePanel(title: feed.loading ? "Finding your next lesson…" : "Your next session starts here.",
-                                         message: feed.error ?? (feed.loading ? "Loading your lesson feed." : feed.emptySearch != nil ? "No matching lessons. Search the web with your original input." : "No lessons are available here yet. Try another search or open a shared lesson link on Home."),
-                                         actionTitle: feed.loading ? nil : feed.emptySearch != nil ? "Search in browser" : "Try again") {
-                                if let request = feed.emptySearch { openBrowserSearch(request) }
-                                else { Task { await feed.load(api: api, search: search) } }
+                    VStack(spacing: 0) {
+                        StudioCover(artwork: "DiscoverCover", height: 190...350, ratio: 1.16, backdrop: .black) {
+                            VStack(alignment: .leading) {
+                                feedHeader
+                                Spacer(minLength: 52)
+                                CoverTitle(title: "Discover", size: 62)
                             }
-                        }.miconPage()
+                        }
+                        if api.session == nil {
+                            VStack(alignment: .leading, spacing: 12) {
+                                LocalizedText("Connecting your lesson feed…")
+                                    .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
+                                ConnectionPanel(showsArtwork: false)
+                            }.miconPage()
+                        } else {
+                            emptyFeed.miconPage()
+                        }
                     }
                 }
+                .scrollClipDisabled()
             } else {
                 GeometryReader { container in
                     GeometryReader { geometry in
@@ -237,6 +235,16 @@ struct DiscoverView: View {
         players.suspend()
         browserSearch = PolicyDocument(title: "Web search", url: url)
     }
+
+    private var emptyFeed: some View {
+        MessagePanel(title: feed.loading ? "Finding your next lesson…" : "Your next session starts here.",
+                     message: feed.error ?? (feed.loading ? "Loading your lesson feed." : feed.emptySearch != nil ? "No matching lessons. Search the web with your original input." : "No lessons are available here yet. Try another search or open a shared lesson link on Home."),
+                     actionTitle: feed.loading ? nil : feed.emptySearch != nil ? "Search in browser" : "Try again") {
+            if let request = feed.emptySearch { openBrowserSearch(request) }
+            else { Task { await feed.load(api: api, search: search) } }
+        }
+    }
+
     private var feedHeader: some View {
         HStack {
             Spacer(minLength: 0)

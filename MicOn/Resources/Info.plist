@@ -37,6 +37,8 @@
 	<string>$(MICON_GOOGLE_ADS_APP_ID)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>MicOnAPIHost</key>
 	<string>$(MICON_API_HOST)</string>
 	<key>MicOnAdsTestMode</key>
@@ -51,8 +53,6 @@
 	<string>$(MICON_TERMS_URL)</string>
 	<key>MicOnWebsiteURL</key>
 	<string>$(MICON_WEBSITE_URL)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save the singing practice video you choose to export to your photo library.</string>
 	<key>SKAdNetworkItems</key>
@@ -64,6 +64,10 @@
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InstrumentSerif-Regular.ttf</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UISupportedInterfaceOrientations</key>

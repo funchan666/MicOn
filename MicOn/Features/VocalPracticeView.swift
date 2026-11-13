@@ -39,26 +39,35 @@ struct VocalPracticeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeading(title: "Singing log") { dismiss() }
+            HStack {
+                Spacer(minLength: 0)
+                IconButton(symbol: .close, label: "Close") { dismiss() }
+                    .studioGlass(in: Circle())
+            }.padding(.horizontal, 20).padding(.top, 5)
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ChoiceStrip(values: ["Practice", "Sessions"], selected: history ? "Sessions" : "Practice") {
-                        history = $0 == "Sessions"
+                VStack(spacing: 0) {
+                    StudioCover(artwork: "JournalCover", height: 162...290, ratio: 1.46) {
+                        CoverTitle(title: "Singing log", size: 56)
                     }
-                    if let message = journal.storageMessage { ErrorNote(message: message) }
-                    if history { sessions }
-                    else if let session = journal.activeSession { practice(session) }
-                    else { start }
-                }.miconPage()
-            }.scrollDismissesKeyboard(.interactively)
+                    VStack(alignment: .leading, spacing: 18) {
+                        ChoiceStrip(values: ["Practice", "Sessions"], selected: history ? "Sessions" : "Practice") {
+                            history = $0 == "Sessions"
+                        }
+                        if let message = journal.storageMessage { ErrorNote(message: message) }
+                        if history { sessions }
+                        else if let session = journal.activeSession { practice(session) }
+                        else { start }
+                    }.miconPage()
+                }
+            }.scrollClipDisabled().scrollDismissesKeyboard(.interactively)
         }.miconScreenBackground().foregroundStyle(MicOnStyle.paper)
             .sheet(item: $selectedSession) { session in sessionDetail(session) }
     }
 
     private var start: some View {
         VStack(alignment: .leading, spacing: 16) {
-            MicOnIllustration(name: "PracticeHero", height: 150)
-            LocalizedText("Work on one phrase at a time and remember the key that felt comfortable.").font(.booth(.title3, display: true))
+            LocalizedText("Work on one phrase at a time and remember the key that felt comfortable.")
+                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Song or phrase name", text: $title).submitLabel(.done).miconField()
             ActionButton(title: "Start a song session") {

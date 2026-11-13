@@ -32,6 +32,8 @@
 		ACCE55100000000000000001 /* MicOn/Features/AccountAccessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCE55100000000000000002 /* MicOn/Features/AccountAccessViews.swift */; };
 		C68F5643B660D6177C54038C /* MicOn/Core/LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1983D2A3DA5E7E885A18C42A /* MicOn/Core/LibraryStore.swift */; };
 		C71000000000000000000001 /* MicOn/App/BoothTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71000000000000000000002 /* MicOn/App/BoothTypography.swift */; };
+		C71000000000000000000003 /* InstrumentSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = C71000000000000000000004 /* InstrumentSerif-Regular.ttf */; };
+		C71000000000000000000005 /* InstrumentSerif-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = C71000000000000000000006 /* InstrumentSerif-OFL.txt */; };
 		C71000000000000000000003 /* MicOn/Core/VocalPracticeJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71000000000000000000004 /* MicOn/Core/VocalPracticeJournal.swift */; };
 		C71000000000000000000005 /* MicOn/Features/VocalPracticeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C71000000000000000000006 /* MicOn/Features/VocalPracticeView.swift */; };
 		C7F5D928DE552FB7782E6664 /* MicOn/Core/LessonContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F5C66D3BCB0711DB84F1A3B /* MicOn/Core/LessonContracts.swift */; };
@@ -77,6 +79,8 @@
 		B01A9BEACE5275588553E5AD /* MicOn/Resources/PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = MicOn/Resources/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		B2E822DCE2A437F4FCB346A9 /* MicOn/Core/QuotaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicOn/Core/QuotaStore.swift; sourceTree = SOURCE_ROOT; };
 		C71000000000000000000002 /* MicOn/App/BoothTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicOn/App/BoothTypography.swift; sourceTree = SOURCE_ROOT; };
+		C71000000000000000000004 /* InstrumentSerif-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = MicOn/Resources/Fonts/InstrumentSerif-Regular.ttf; sourceTree = SOURCE_ROOT; };
+		C71000000000000000000006 /* InstrumentSerif-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = MicOn/Resources/Fonts/InstrumentSerif-OFL.txt; sourceTree = SOURCE_ROOT; };
 		C71000000000000000000004 /* MicOn/Core/VocalPracticeJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicOn/Core/VocalPracticeJournal.swift; sourceTree = SOURCE_ROOT; };
 		C71000000000000000000006 /* MicOn/Features/VocalPracticeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicOn/Features/VocalPracticeView.swift; sourceTree = SOURCE_ROOT; };
 		E3B808EADBFC1086054EA47A /* MicOn/Core/APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicOn/Core/APIClient.swift; sourceTree = SOURCE_ROOT; };
@@ -141,6 +145,8 @@
 				B01A9BEACE5275588553E5AD /* MicOn/Resources/PrivacyInfo.xcprivacy */,
 				86E8C246447DD4C5D9405F57 /* MicOn/Resources/Info.plist */,
 				A09B10000000000000000002 /* MicOn/Resources/LaunchScreen.storyboard */,
+				C71000000000000000000004 /* InstrumentSerif-Regular.ttf */,
+				C71000000000000000000006 /* InstrumentSerif-OFL.txt */,
 				29492C6D58CC63AE5CCF1383 /* Config/MicOn.xcconfig */,
 				0A3E27B8CA818264D75C8D81 /* Products */,
 			);
@@ -223,6 +229,8 @@
 				445B4DAFB0E123A139308F4D /* MicOn/Resources/Commerce.json in Resources */,
 				16EB816FD26D57C86FA63242 /* MicOn/Resources/PrivacyInfo.xcprivacy in Resources */,
 				A09B10000000000000000001 /* MicOn/Resources/LaunchScreen.storyboard in Resources */,
+				C71000000000000000000003 /* InstrumentSerif-Regular.ttf in Resources */,
+				C71000000000000000000005 /* InstrumentSerif-OFL.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -387,14 +395,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = JPTS6M4T5B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MicOn/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -413,14 +420,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = JPTS6M4T5B;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MicOn/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

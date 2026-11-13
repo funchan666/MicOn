@@ -546,3 +546,15 @@
 "The distribution package does not exist" = "앱 배포 설정을 찾을 수 없습니다.";
 "Web search" = "웹 검색";
 "Opening page…" = "페이지 여는 중…";
+
+"Listening library" = "듣기 모음";
+"Booth pass" = "노래 부스 이용권";
+
+"Listen back" = "다시 듣기";
+"Singing log" = "노래 기록";
+"Review a singing take" = "노래 녹화 다시 보기";
+"Open a singing lesson" = "보컬 레슨 열기";
+"Karaoke lesson collections" = "노래방 레슨 모음";
+"Watch tutorials" = "튜토리얼 보기";
+"Play" = "재생";
+"Pause" = "일시 정지";

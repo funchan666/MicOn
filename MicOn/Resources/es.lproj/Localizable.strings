@@ -546,3 +546,15 @@
 "The distribution package does not exist" = "No se encontró la configuración de distribución de la aplicación.";
 "Web search" = "Búsqueda web";
 "Opening page…" = "Abriendo página…";
+
+"Listening library" = "Biblioteca de escucha";
+"Booth pass" = "Pase de cabina";
+
+"Listen back" = "Escuchar de nuevo";
+"Singing log" = "Registro de canto";
+"Review a singing take" = "Revisar una toma de canto";
+"Open a singing lesson" = "Abrir una clase de canto";
+"Karaoke lesson collections" = "Colecciones de clases de karaoke";
+"Watch tutorials" = "Ver tutoriales";
+"Play" = "Reproducir";
+"Pause" = "Pausar";

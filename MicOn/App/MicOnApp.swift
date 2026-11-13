@@ -101,14 +101,12 @@ struct MicOnStartupView: View {
 }
 
 enum MicOnTab: Int, CaseIterable, Hashable {
-    case home, discover, tools, library, me
-    var name: String { ["Home", "Discover", "Practice", "Library", "Me"][rawValue] }
+    case home, discover, library, me
+    var name: String { ["Listen back", "Discover", "Library", "Me"][rawValue] }
     // Original single-colour tab artwork; the system tab bar tints it.
-    var artwork: String { ["TabHome", "TabDiscover", "TabTools", "TabLibrary", "TabMe"][rawValue] }
+    var artwork: String { ["TabHome", "TabDiscover", "TabLibrary", "TabMe"][rawValue] }
 }
 
-// System tab item: title and original image, so the bar can follow iPhone Duo's
-// vertical bar layout and move titles into the system overflow when needed.
 private struct MicOnTabItem: View {
     let tab: MicOnTab
     @Environment(\.locale) private var locale
@@ -121,14 +119,63 @@ private struct MicOnTabItem: View {
     }
 }
 
+private struct MicOnTabBar: View {
+    @Binding var selection: MicOnTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(MicOnTab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
+        .padding(5)
+        .studioGlass(in: RoundedRectangle(cornerRadius: 25))
+        .shadow(color: .black.opacity(0.28), radius: 16, y: 5)
+        .frame(maxWidth: 500)
+        .padding(.horizontal, 14)
+        .padding(.top, 5)
+        .padding(.bottom, 4)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selection)
+    }
+
+    private func tabButton(_ tab: MicOnTab) -> some View {
+        let selected = selection == tab
+        return Button { selection = tab } label: {
+            VStack(spacing: 4) {
+                TintedArtwork(name: tab.artwork, tint: selected ? MicOnStyle.ink : MicOnStyle.paper)
+                    .frame(width: 26, height: 26)
+                    .frame(width: 46, height: 31)
+                    .background {
+                        if selected {
+                            Capsule().fill(MicOnStyle.accent)
+                                .matchedGeometryEffect(id: "active-tab", in: highlight)
+                        }
+                    }
+                LocalizedText(tab.name)
+                    .font(.booth(.caption2, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? MicOnStyle.paper : MicOnStyle.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 2).padding(.vertical, 4)
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 54, alignment: .top)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(LocalizedStringKey(tab.name))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("tab.\(tab.name.lowercased())")
+    }
+}
+
 private extension View {
-    func miconTab(_ tab: MicOnTab) -> some View {
+    func miconTab(_ tab: MicOnTab, systemBar: Bool) -> some View {
         tabItem { MicOnTabItem(tab: tab) }
             .tag(tab)
-            .toolbarBackground(MicOnStyle.background, for: .tabBar)
-            .toolbarBackground(.visible, for: .tabBar)
-            .toolbarColorScheme(.dark, for: .tabBar)
-            .accessibilityIdentifier("tab.\(tab.name.lowercased())")
+            .toolbar(systemBar ? .visible : .hidden, for: .tabBar)
     }
 }
 
@@ -139,26 +186,29 @@ struct MicOnRootView: View {
     @EnvironmentObject private var quota: QuotaStore
     @EnvironmentObject private var offline: OfflineStore
     @Environment(\.scenePhase) private var scenePhase
-    @State private var tab: MicOnTab = .home
+    @Environment(\.self) private var environment
+    @SceneStorage("root.tab") private var tab: MicOnTab = .home
     @State private var editing: PracticeRecording?
-    @State private var linkDraft = ""
+    @SceneStorage("home.linkDraft") private var linkDraft = ""
     @State private var libraryFilter = "Saved"
+    @State private var showingTools = false
     var body: some View {
-        TabView(selection: $tab) {
-            HomeView(openAccount: { tab = .me }, discover: { tab = .discover }, openTools: { tab = .tools }, link: $linkDraft)
-                .miconTab(.home)
-            // Mount the feed only while selected: it owns players and quota admission.
-            Group {
-                if tab == .discover { DiscoverView(onExit: { tab = .home }) }
-                else { MicOnStyle.background.ignoresSafeArea() }
-            }.miconTab(.discover)
-            ToolsView().miconTab(.tools)
-            LibraryView(edit: { editing = $0 }, filter: $libraryFilter).miconTab(.library)
-            AccountView().miconTab(.me)
+        GeometryReader { container in
+            let systemBar = usesSystemTabBar(in: container)
+            tabPages(systemBar: systemBar)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if !systemBar { MicOnTabBar(selection: $tab) }
+                }
         }
         .tint(MicOnStyle.accent)
         .foregroundStyle(.white)
             .sheet(item: $editing) { EditorSheet(initialMovie: $0) }
+            .sheet(isPresented: $showingTools) {
+                VStack(spacing: 0) {
+                    SheetHeading(title: "Review a singing take") { showingTools = false }
+                    ToolsView()
+                }.miconScreenBackground().modifier(AccountBusyModifier())
+            }
             .overlay(alignment: .top) {
                 if tab != .discover { DownloadCompletionNotice().padding(.top, 8) }
             }
@@ -188,10 +238,39 @@ struct MicOnRootView: View {
             }
             .modifier(AccountBusyModifier())
     }
+
+    private func tabPages(systemBar: Bool) -> some View {
+        TabView(selection: $tab) {
+            HomeView(openAccount: { tab = .me }, discover: { tab = .discover }, openTools: { showingTools = true }, link: $linkDraft)
+                .miconTab(.home, systemBar: systemBar)
+            // Mount the feed only while selected: it owns players and quota admission.
+            Group {
+                if tab == .discover { DiscoverView(onExit: { tab = .home }) }
+                else { MicOnStyle.background.ignoresSafeArea() }
+            }.miconTab(.discover, systemBar: systemBar)
+            LibraryView(edit: { editing = $0 }, filter: $libraryFilter)
+                .miconTab(.library, systemBar: systemBar)
+            AccountView().miconTab(.me, systemBar: systemBar)
+        }
+    }
+
+    private func usesSystemTabBar(in container: GeometryProxy) -> Bool {
+        if environment.dynamicTypeSize.isAccessibilitySize || container.size.width < 264 { return true }
+        guard #available(iOS 27.1, *) else { return false }
+        if environment.toolbarVerticalEdge != nil { return true }
+        // Only a fold or camera region touching the dock needs to change the bar.
+        let width = min(container.size.width, 528)
+        let height = min(container.size.height, 88)
+        let dock = CGRect(x: (container.size.width - width) / 2, y: container.size.height - height,
+                          width: width, height: height)
+        let regions = container.reservedRegions(kind: .division) + container.reservedRegions(kind: .occlusion)
+        return regions.contains { $0.isActive && $0.frame.intersects(dock) }
+    }
 }
 
 // A network recovery surface, not a second login or consent gate.
 struct ConnectionPanel: View {
+    var showsArtwork = true
     @EnvironmentObject private var api: APIClient
     @State private var error: String?
     @State private var connecting = false
@@ -199,7 +278,7 @@ struct ConnectionPanel: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            BoothArtwork(kind: .studio, height: 170)
+            if showsArtwork { BoothArtwork(kind: .studio, height: 170) }
             if let error {
                 MessagePanel(title: "Let’s reconnect.", message: error)
                 ActionButton(title: "Try again", busy: connecting) { attempt += 1 }

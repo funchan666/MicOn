@@ -546,3 +546,15 @@
 "The distribution package does not exist" = "لم يتم العثور على إعدادات توزيع التطبيق.";
 "Web search" = "بحث الويب";
 "Opening page…" = "جارٍ فتح الصفحة…";
+
+"Listening library" = "مكتبة الاستماع";
+"Booth pass" = "عضوية غرفة الغناء";
+
+"Listen back" = "استمع مجددًا";
+"Singing log" = "سجل الغناء";
+"Review a singing take" = "مراجعة تسجيل غنائي";
+"Open a singing lesson" = "فتح درس غناء";
+"Karaoke lesson collections" = "مجموعات دروس الكاريوكي";
+"Watch tutorials" = "مشاهدة الدروس";
+"Play" = "تشغيل";
+"Pause" = "إيقاف مؤقت";
