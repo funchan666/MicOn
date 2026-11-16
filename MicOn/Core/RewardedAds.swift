@@ -217,7 +217,7 @@ final class RewardedAds: NSObject, ObservableObject, FullScreenContentDelegate {
                     self.preloadUnitID = nil
                     self.preloadRequestID = nil
                     let failure = error as NSError
-                    self.appOpenLog.error("App-open inventory failed; domain=\(failure.domain, privacy: .public), code=\(failure.code), message=\(failure.localizedDescription, privacy: .public)")
+                    self.appOpenLog.error("App-open inventory failed; domain=\(failure.domain, privacy: .public), code=\(failure.code)")
                 }
                 throw error
             }
@@ -312,12 +312,13 @@ final class RewardedAds: NSObject, ObservableObject, FullScreenContentDelegate {
                 let ad = try await self.preloadAppOpen(unitID: unitID)
                 try Task.checkCancellation()
                 guard self.appOpenAttempt == attempt, commerce.api.session?.userId.value == owner,
-                      !commerce.premium, UIApplication.shared.applicationState == .active,
+                      commerce.rightsVerified, !commerce.premium, UIApplication.shared.applicationState == .active,
                       !self.busy, !self.isPresenting, !commerce.busy, !commerce.preparingPurchase,
                       !accountAccess.isBusy,
                       AppOpenTiming.isDue(intervalMinutes: interval,
                         lastShown: UserDefaults.standard.object(forKey: key) as? Date) else {
-                    self.finishAppOpen(attempt: attempt); return
+                    self.finishAppOpen(attempt: attempt, reason: "presentation-no-longer-eligible")
+                    return
                 }
                 do { try ad.canPresent(from: nil) }
                 catch {
@@ -368,6 +369,7 @@ final class RewardedAds: NSObject, ObservableObject, FullScreenContentDelegate {
         if !preservePreparation { appOpenTask?.cancel() }
         appOpenTask = nil
         appOpenAd = nil
+        presentedUnitID = nil
         appOpenHistoryKey = nil
         isPreparingAppOpen = false
         isPresenting = false
@@ -384,12 +386,15 @@ final class RewardedAds: NSObject, ObservableObject, FullScreenContentDelegate {
         do { try await ConsentForm.presentPrivacyOptionsForm(from: nil) }
         catch { self.error = error.localizedDescription }
     }
+    private func finishPresentedAppOpen(reason: String) {
+        let unitID = presentedUnitID
+        finishAppOpen(reason: reason)
+        if let unitID { Task { try? await self.preloadAppOpen(unitID: unitID) } }
+    }
+
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         if let current = appOpenAd, ad === current {
-            let unitID = presentedUnitID
-            presentedUnitID = nil
-            finishAppOpen()
-            if let unitID { Task { try? await self.preloadAppOpen(unitID: unitID) } }
+            finishPresentedAppOpen(reason: "dismissed")
             return
         }
         guard let current = rewarded, ad === current else { return }
@@ -400,7 +405,12 @@ final class RewardedAds: NSObject, ObservableObject, FullScreenContentDelegate {
         else if error == nil { message = "No reward was received. Finish the ad to receive your reward." }
     }
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
-        if let current = appOpenAd, ad === current { finishAppOpen(); return }
+        if let current = appOpenAd, ad === current {
+            let failure = error as NSError
+            appOpenLog.error("App-open presentation failed; domain=\(failure.domain, privacy: .public), code=\(failure.code)")
+            finishPresentedAppOpen(reason: "presentation-failed")
+            return
+        }
         guard let current = rewarded, ad === current else { return }
         rewarded = nil
         isPresenting = false

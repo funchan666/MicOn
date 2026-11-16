@@ -42,6 +42,11 @@ struct OfflineVideo: Codable, Identifiable {
     // directory. Older indexes only contain relativePath and remain readable.
     var systemAssetURL: URL? = nil
     var id: String { clip.id }
+    var displayName: String {
+        let ext = url.pathExtension.lowercased()
+        guard !isHLS, !ext.isEmpty, !clip.title.lowercased().hasSuffix("." + ext) else { return clip.title }
+        return clip.title + "." + ext
+    }
     var url: URL {
         if isHLS, let systemAssetURL, systemAssetURL.isFileURL { return OfflineAssetLocation.restoredHLSURL(systemAssetURL) }
         return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true).appendingPathComponent(relativePath)

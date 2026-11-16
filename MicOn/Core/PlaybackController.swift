@@ -1,4 +1,5 @@
 import AVFoundation
+import OSLog
 import SwiftUI
 
 // Progress ticks belong to the scrubber, not the entire video/control hierarchy.
@@ -14,12 +15,15 @@ final class PlaybackController: ObservableObject {
     @Published var isPlaying = false
     @Published var isLoading = true
     @Published var error: String?
+    @Published private(set) var presentationSize: CGSize = .zero
+    private let log = Logger(subsystem: "app.micon", category: "Playback")
     let timeline = PlaybackTimeline()
     @Published var muted = false
     @Published var speed: Float = 1
     private(set) var loadedURL: URL?
     var intendsPlayback: Bool { wantsPlayback }
     private var status: NSKeyValueObservation?
+    private var sizeObserver: NSKeyValueObservation?
     private var timeStatus: NSKeyValueObservation?
     private var playerStatus: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -54,9 +58,17 @@ final class PlaybackController: ObservableObject {
         }
     }
     func load(_ url: URL, autoplay: Bool) {
+        guard !url.isFileURL || FileManager.default.fileExists(atPath: url.path) else {
+            release()
+            loadedURL = url
+            log.notice("Local media file is missing")
+            fail("This file is unavailable. Open the original again or download a new copy.")
+            return
+        }
         let item = AVPlayerItem(asset: AVURLAsset(url: url))
         load(item, autoplay: autoplay)
         loadedURL = url
+        updatePlaybackState()
     }
     func load(_ item: AVPlayerItem, autoplay: Bool) {
         release()
@@ -67,11 +79,21 @@ final class PlaybackController: ObservableObject {
         item.preferredForwardBufferDuration = 0
         player.replaceCurrentItem(with: item)
         let token = generation
+        sizeObserver = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] observed, _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.generation == token, self.player.currentItem === observed else { return }
+                let size = observed.presentationSize
+                if self.presentationSize != size { self.presentationSize = size }
+            }
+        }
         status = item.observe(\.status, options: [.initial, .new]) { [weak self] observed, _ in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token, self.player.currentItem === observed else { return }
                 if observed.status == .failed {
-                    self.fail(observed.error?.localizedDescription ?? "This clip could not be played.")
+                    self.reportFailure(observed.error)
+                    self.fail(self.loadedURL?.isFileURL == true ?
+                              "This video could not be played. Try another file." :
+                              "Couldn’t play this video. Retry or check the link.")
                 } else if observed.status == .readyToPlay {
                     if self.pendingSeek != nil { self.performPendingSeek() }
                     else if self.wantsPlayback { self.play() }
@@ -87,10 +109,15 @@ final class PlaybackController: ObservableObject {
                 self.seek(0)
             }
         }
-        failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+        failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] notification in
+            let reported = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token else { return }
-                self.fail("Playback was interrupted. Check your connection and try again.")
+                let error = (reported as Error?) ?? self.player.currentItem?.error
+                self.reportFailure(error)
+                self.fail(self.loadedURL?.isFileURL == true ?
+                          "Playback was interrupted. Retry or open the file again." :
+                          "Playback was interrupted. Check your connection and try again.")
             }
         }
     }
@@ -176,27 +203,38 @@ final class PlaybackController: ObservableObject {
             (player.currentItem?.status == .unknown || (wantsPlayback && player.timeControlStatus == .waitingToPlayAtSpecifiedRate))
         if isPlaying != playing { isPlaying = playing }
         if isLoading != loading { isLoading = loading }
-        if loading, wantsPlayback, loadingDeadline == nil {
+        let waiting = wantsPlayback || loadedURL?.isFileURL == true
+        if loading, waiting, loadingDeadline == nil {
             let token = generation
             loadingDeadline = Task { [weak self] in
                 do { try await Task.sleep(for: .seconds(20)) } catch { return }
-                guard let self, self.generation == token, self.wantsPlayback, self.isLoading else { return }
-                self.fail("This video is taking too long to load. Check your connection and retry.")
+                guard let self, self.generation == token, self.isLoading else { return }
+                let local = self.loadedURL?.isFileURL == true
+                self.log.notice("Playback timed out; local=\(local)")
+                self.fail(local ? "Playback was interrupted. Retry or open the file again." :
+                          "This video is taking too long to load. Check your connection and retry.")
             }
-        } else if !loading || !wantsPlayback {
+        } else if !loading || !waiting {
             loadingDeadline?.cancel()
             loadingDeadline = nil
         }
     }
     private func fail(_ message: String) {
-        pause()
         error = message
-        isLoading = false
+        pause()
+    }
+    private func reportFailure(_ error: Error?) {
+        let failure = error.map { $0 as NSError }
+        let underlying = failure?.userInfo[NSUnderlyingErrorKey] as? NSError
+        log.notice("Playback failed; local=\(self.loadedURL?.isFileURL == true), domain=\(failure?.domain ?? "none", privacy: .public), code=\(failure?.code ?? 0), underlyingDomain=\(underlying?.domain ?? "none", privacy: .public), underlyingCode=\(underlying?.code ?? 0)")
     }
     func release() {
         generation = UUID()
         pause()
+        loadingDeadline?.cancel()
+        loadingDeadline = nil
         status = nil
+        sizeObserver = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         endObserver = nil
@@ -206,6 +244,8 @@ final class PlaybackController: ObservableObject {
         player.currentItem?.cancelPendingSeeks()
         player.replaceCurrentItem(with: nil)
         loadedURL = nil
+        error = nil
+        presentationSize = .zero
         timeline.elapsed = 0
         timeline.duration = 0
         isLoading = false

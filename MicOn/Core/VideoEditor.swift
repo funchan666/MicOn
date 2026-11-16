@@ -44,6 +44,7 @@ final class VideoEditor: ObservableObject {
     private var previewRevision = UUID()
 
     func open(_ url: URL) async {
+        if sourceURL == url, duration > 0 { return }
         clearRenderedPreview()
         let requestID = UUID()
         revision = requestID
@@ -56,15 +57,19 @@ final class VideoEditor: ObservableObject {
         thumbnails = []
         preview.release()
         do {
+            guard FileManager.default.isReadableFile(atPath: url.path) else {
+                throw MicOnError.service("This file is unavailable. Open the original again or download a new copy.")
+            }
             let asset = AVURLAsset(url: url)
             let duration = try await asset.load(.duration).seconds
             let playable = try await asset.load(.isPlayable)
             let tracks = try await asset.loadTracks(withMediaType: .video)
             guard playable, duration.isFinite, duration > 0.1, !tracks.isEmpty else { throw MicOnError.unsupportedMedia }
+            try Task.checkCancellation()
             guard revision == requestID else { return }
             self.duration = duration
             recipe = EditRecipe(start: 0, end: duration)
-            preview.load(url, autoplay: false)
+            preview.prepare(url)
             isLoading = false
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -77,6 +82,8 @@ final class VideoEditor: ObservableObject {
                     thumbnails.append(UIImage(cgImage: result.image))
                 }
             }
+        } catch is CancellationError {
+            if revision == requestID { isLoading = false }
         } catch {
             guard revision == requestID else { return }
             self.error = error.localizedDescription
@@ -150,11 +157,13 @@ final class VideoEditor: ObservableObject {
         var progressTask: Task<Void, Never>?
         defer { progressTask?.cancel() }
         do {
-            let (composition, video) = try await compose(url: sourceURL, recipe: recipe)
+            var exportRecipe = recipe
+            if audioOnly { exportRecipe.muted = false }
+            let (composition, video) = try await compose(url: sourceURL, recipe: exportRecipe)
             try Task.checkCancellation()
             if cancelRequested { throw CancellationError() }
             if audioOnly, composition.tracks(withMediaType: .audio).isEmpty {
-                throw MicOnError.service("This clip has no audio. Turn off Mute if you want to extract its soundtrack.")
+                throw MicOnError.service("This video has no audio track. Choose a video with sound.")
             }
             guard let session = AVAssetExportSession(asset: composition, presetName: audioOnly ? AVAssetExportPresetAppleM4A : AVAssetExportPresetHighestQuality) else { throw MicOnError.unsupportedMedia }
             exporter = session
@@ -190,7 +199,16 @@ final class VideoEditor: ObservableObject {
         }
     }
     func cancelExport() { cancelRequested = true; exporter?.cancelExport() }
-    func close() { revision = UUID(); clearRenderedPreview(); preview.release(); cancelExport() }
+    func close() {
+        revision = UUID()
+        clearRenderedPreview()
+        cancelExport()
+        sourceURL = nil
+        duration = 0
+        isLoading = false
+        error = nil
+        thumbnails = []
+    }
 
     private func clearRenderedPreview() {
         previewRevision = UUID()
@@ -214,12 +232,11 @@ final class VideoEditor: ObservableObject {
         try track.insertTimeRange(range, of: videoSource, at: .zero)
         if !recipe.muted {
             for audioSource in try await source.loadTracks(withMediaType: .audio) {
-                guard let audio = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
                 let audioRange = try await audioSource.load(.timeRange)
                 let overlap = CMTimeRangeGetIntersection(range, otherRange: audioRange)
-                if overlap.duration.seconds > 0 {
-                    try audio.insertTimeRange(overlap, of: audioSource, at: CMTimeSubtract(overlap.start, range.start))
-                }
+                guard overlap.duration.seconds > 0,
+                      let audio = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+                try audio.insertTimeRange(overlap, of: audioSource, at: CMTimeSubtract(overlap.start, range.start))
             }
         }
         let speed = max(0.25, min(recipe.speed, 4))

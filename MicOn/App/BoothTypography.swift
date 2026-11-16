@@ -7,24 +7,40 @@ extension Font {
     }
 }
 
+struct MediaTitle: View {
+    let title: String
+    var textStyle: Font.TextStyle = .largeTitle
+    var tint = MicOnStyle.paper
+
+    var body: some View {
+        LocalizedText(title)
+            .font(.booth(textStyle, weight: .semibold))
+            .foregroundStyle(tint)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 struct CoverTitle: View {
     @Environment(\.locale) private var locale
     let title: String
     var size: CGFloat = 58
+    var textStyle: Font.TextStyle = .largeTitle
+    var tint = MicOnStyle.paper
 
     private var font: Font {
         switch AppLanguage.from(locale) {
         case .ar, .ja, .ko:
-            .system(.largeTitle, weight: .semibold)
+            .system(textStyle, weight: .semibold)
         case .en, .es, .id, .pt:
-            .custom("InstrumentSerif-Regular", size: size, relativeTo: .largeTitle)
+            .custom("InstrumentSerif-Regular", size: size, relativeTo: textStyle)
         }
     }
 
     var body: some View {
         LocalizedText(title)
             .font(font)
-            .foregroundStyle(MicOnStyle.paper)
+            .foregroundStyle(tint)
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityAddTraits(.isHeader)
     }

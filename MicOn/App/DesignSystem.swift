@@ -13,6 +13,8 @@ enum MicOnStyle {
     static let mist = Color(red: 0.929, green: 0.831, blue: 0.765)
     static let line = Color.white.opacity(0.10)
     static let danger = Color(red: 1.000, green: 0.612, blue: 0.533)
+    static let mediaBackground = Color(red: 0.106, green: 0.098, blue: 0.094)
+    static let mediaSurface = Color(red: 0.169, green: 0.153, blue: 0.145)
 }
 
 // MARK: - Original raster artwork (Asset Catalog). Missing art never blocks layout or touch.
@@ -69,58 +71,72 @@ struct GuideArtwork: View {
 
 struct StudioCover<Content: View>: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.self) private var environment
     let artwork: String
     var height: ClosedRange<CGFloat> = 214...320
     var ratio: CGFloat = 1.25
     var backdrop = MicOnStyle.background
+    var mirrorsArtworkInRTL = false
+    var artworkSaturation: Double = 1
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         let coverHeight = verticalSizeClass == .compact ? height.lowerBound...height.lowerBound : height
         StudioCoverLayout(height: coverHeight, ratio: ratio) {
             content()
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                .pageHorizontalMargins()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 16)
-                .frame(maxWidth: 680)
-                .frame(maxWidth: .infinity)
+                .readableColumn()
         }
         .background {
-            GeometryReader { geometry in
-                Image(artwork).resizable().interpolation(.high).scaledToFill()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
-                    .overlay {
-                        LinearGradient(stops: [
-                            .init(color: .black.opacity(0.43), location: 0),
-                            .init(color: .clear, location: 0.23),
-                            .init(color: .clear, location: 0.46),
-                            .init(color: backdrop.opacity(0.64), location: 0.72),
-                            .init(color: backdrop, location: 1)
-                        ], startPoint: .top, endPoint: .bottom)
-                    }
-            }
+            coverImage.allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder private var coverImage: some View {
+        let image = GeometryReader { geometry in
+            Image(artwork).resizable().interpolation(.high).scaledToFill()
+                .flipsForRightToLeftLayoutDirection(mirrorsArtworkInRTL)
+                .saturation(artworkSaturation)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+                .overlay {
+                    LinearGradient(stops: [
+                        .init(color: .black.opacity(0.43), location: 0),
+                        .init(color: .clear, location: 0.23),
+                        .init(color: .clear, location: 0.46),
+                        .init(color: backdrop.opacity(0.64), location: 0.72),
+                        .init(color: backdrop, location: 1)
+                    ], startPoint: .top, endPoint: .bottom)
+                }
+        }
             .background(backdrop)
             .ignoresSafeArea(.container, edges: [.top, .horizontal])
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+
+        if #available(iOS 27.1, *), environment.toolbarVerticalEdge != nil {
+            image.backgroundExtensionEffect()
+        } else {
+            image
         }
     }
 }
 
+// Measure the full-width artwork and safe-area foreground independently.
 private struct StudioCoverLayout: Layout {
     let height: ClosedRange<CGFloat>
     let ratio: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? subviews[0].sizeThatFits(.unspecified).width
-        let contentHeight = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
         let artworkHeight = min(max(width / ratio, height.lowerBound), height.upperBound)
+        let contentHeight = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
         return CGSize(width: width, height: max(artworkHeight, contentHeight))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        subviews[0].place(at: CGPoint(x: bounds.midX, y: bounds.maxY),
+                          anchor: .bottom,
+                          proposal: ProposedViewSize(bounds.size))
     }
 }
 
@@ -173,6 +189,7 @@ struct TintedArtwork: View {
 }
 
 struct IconButton: View {
+    @Environment(\.locale) private var locale
     let symbol: MicOnGlyph
     let label: String
     var selected = false
@@ -190,7 +207,8 @@ struct IconButton: View {
             .frame(minWidth: 44, minHeight: 44)
             .background { if selected { BoothSurface(tone: .plum) } }
             .contentShape(.interaction, Rectangle())
-        }.buttonStyle(PressStyle()).accessibilityLabel(LocalizedStringKey(label))
+        }.buttonStyle(PressStyle())
+            .accessibilityLabel(Text(verbatim: L10n.display(label, language: AppLanguage.from(locale))))
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -252,6 +270,52 @@ struct MessagePanel: View {
             .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
+
+struct StudioEmptyState: View {
+    let title: String
+    let message: String
+    let actionTitle: String
+    let symbol: MicOnGlyph
+    var primary = false
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                CoverTitle(title: title, size: 39, textStyle: .title)
+                LocalizedText(message).font(.booth(.body))
+                    .foregroundStyle(MicOnStyle.secondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button(action: action) {
+                actionLabel.contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: 420, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var actionLabel: some View {
+        let label = HStack(spacing: 10) {
+            Glyph(symbol: symbol, size: 16, tint: primary ? MicOnStyle.ink : MicOnStyle.accent)
+            LocalizedText(actionTitle).font(.booth(.subheadline, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .frame(minWidth: 44, minHeight: 48)
+        .foregroundStyle(primary ? MicOnStyle.ink : MicOnStyle.paper)
+
+        if primary {
+            label.background(MicOnStyle.accent, in: Capsule())
+        } else {
+            label.studioGlass(in: Capsule())
+        }
+    }
+}
+
 struct ErrorNote: View {
     @Environment(\.locale) private var locale
     let message: String
@@ -313,10 +377,28 @@ extension View {
     func studioGlass(in shape: some InsettableShape) -> some View {
         modifier(StudioGlass(shape: shape))
     }
+    func studioCoverControl(alignment: Alignment = .trailing, _ control: () -> some View) -> some View {
+        overlay(alignment: .top) {
+            control()
+                .studioGlass(in: Circle())
+                .accessibilitySortPriority(1)
+                .frame(maxWidth: .infinity, alignment: alignment)
+                .padding(.top, 16)
+                .readableColumn()
+        }
+    }
+    func studioPage() -> some View {
+        padding(.top, 16).padding(.bottom, 24).readableColumn()
+    }
     // A readable column follows the available container (outer or inner display) without resetting state.
-    func miconPage() -> some View {
-        pageHorizontalMargins().padding(.top, 16).padding(.bottom, 24)
+    func miconPage(topPadding: CGFloat = 16) -> some View {
+        pageHorizontalMargins().padding(.top, topPadding).padding(.bottom, 24)
             .frame(maxWidth: 680).frame(maxWidth: .infinity, alignment: .top)
+    }
+    fileprivate func readableColumn() -> some View {
+        padding(.horizontal, 20)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity, alignment: .top)
     }
     @ViewBuilder
     fileprivate func pageHorizontalMargins() -> some View {

@@ -93,10 +93,17 @@ struct PolicyDocument: Identifiable {
     var id: String { url.absoluteString }
 }
 
-struct PolicyLinks: View {
-    var compact = false
+struct PolicyLinks<Leading: View>: View {
+    private let compact: Bool
+    private let leading: () -> Leading
     @EnvironmentObject private var api: APIClient
     @State private var document: PolicyDocument?
+
+    init(compact: Bool = false, @ViewBuilder leading: @escaping () -> Leading) {
+        self.compact = compact
+        self.leading = leading
+    }
+
     var body: some View {
         Group {
             if compact { linkLayout.buttonStyle(PressStyle()) }
@@ -106,20 +113,33 @@ struct PolicyLinks: View {
     private var linkLayout: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: compact ? 16 : 10) { links }
+                .fixedSize(horizontal: true, vertical: false)
             VStack(alignment: .leading, spacing: compact ? 0 : 10) { links }
         }.font(.booth(.footnote, weight: .medium)).foregroundStyle(MicOnStyle.accent)
     }
     @ViewBuilder private var links: some View {
+        leading()
         if let url = api.configuration.termsURL {
-            Button("Terms of Use") { document = PolicyDocument(title: "Terms of Use", url: url) }
-                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 44)
+            policyLink("Terms of Use", url: url)
         }
         if let url = api.configuration.privacyURL {
-            Button("Privacy Policy") { document = PolicyDocument(title: "Privacy Policy", url: url) }
-                .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 44)
+            policyLink("Privacy Policy", url: url)
         }
+    }
+    private func policyLink(_ title: String, url: URL) -> some View {
+        Button { document = PolicyDocument(title: title, url: url) } label: {
+            LocalizedText(title)
+                .multilineTextAlignment(.leading)
+                .lineLimit(compact ? nil : 1).fixedSize(horizontal: !compact, vertical: compact)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+    }
+}
+
+extension PolicyLinks where Leading == EmptyView {
+    init(compact: Bool = false) {
+        self.init(compact: compact) { EmptyView() }
     }
 }
 
@@ -293,45 +313,56 @@ struct AccountSettingsSection: View {
     private var unavailable: Bool { accountAccess.isBusy || commerce.busy || commerce.preparingPurchase || ads.busy || ads.isPreparingAppOpen || ads.isPresenting }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        VStack(alignment: .leading, spacing: 20) {
             Button { languagePicker = true } label: {
-                AccountMenuRow(title: "App language", detail: AppLanguage(rawValue: languageCode)?.nativeName ?? "Follow system")
-            }.buttonStyle(PressStyle())
-                .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 22))
-                .accessibilityIdentifier("account.language")
-            VStack(alignment: .leading, spacing: 12) {
-                LocalizedText("Privacy & terms").font(.booth(.headline))
-                VStack(spacing: 0) {
-                    if let url = api.configuration.privacyURL {
-                        Button { document = PolicyDocument(title: "Privacy Policy", url: url) } label: {
-                            AccountMenuRow(title: "Privacy Policy")
-                        }
-                    }
-                    if let url = api.configuration.termsURL {
-                        if api.configuration.privacyURL != nil { rowDivider }
-                        Button { document = PolicyDocument(title: "Terms of Use", url: url) } label: {
-                            AccountMenuRow(title: "Terms of Use")
-                        }
-                    }
-                    if let website = api.configuration.websiteURL {
-                        if api.configuration.privacyURL != nil || api.configuration.termsURL != nil { rowDivider }
-                        Button {
-                            websiteError = nil
-                            openURL(website) { accepted in
-                                if !accepted { websiteError = "The browser could not open. Please try again." }
+                AccountMenuRow(symbol: .settings, title: "App language",
+                               detail: AppLanguage(rawValue: languageCode)?.nativeName ?? "Follow system")
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 18))
+                    .contentShape(.interaction, RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("account.language")
+            if api.configuration.privacyURL != nil || api.configuration.termsURL != nil ||
+                api.configuration.websiteURL != nil || ads.privacyOptionsRequired {
+                VStack(alignment: .leading, spacing: 8) {
+                    CoverTitle(title: "Privacy & terms", size: 33, textStyle: .title2)
+                    VStack(spacing: 0) {
+                        if let url = api.configuration.privacyURL {
+                            Button { document = PolicyDocument(title: "Privacy Policy", url: url) } label: {
+                                AccountMenuRow(symbol: .bookmark, title: "Privacy Policy")
                             }
-                        } label: {
-                            AccountMenuRow(title: "Official website")
-                        }.accessibilityIdentifier("account.officialWebsite")
-                    }
-                    if ads.privacyOptionsRequired {
-                        rowDivider
-                        Button { Task { await ads.privacyOptions() } } label: {
-                            AccountMenuRow(title: "Advertising privacy")
+                            rowDivider
+                        }
+                        if let url = api.configuration.termsURL {
+                            Button { document = PolicyDocument(title: "Terms of Use", url: url) } label: {
+                                AccountMenuRow(symbol: .library, title: "Terms of Use")
+                            }
+                            rowDivider
+                        }
+                        if let website = api.configuration.websiteURL {
+                            Button {
+                                websiteError = nil
+                                openURL(website) { accepted in
+                                    if !accepted { websiteError = "The browser could not open. Please try again." }
+                                }
+                            } label: {
+                                AccountMenuRow(symbol: .link, title: "Official website")
+                            }
+                            .accessibilityIdentifier("account.officialWebsite")
+                            rowDivider
+                        }
+                        if ads.privacyOptionsRequired {
+                            Button { Task { await ads.privacyOptions() } } label: {
+                                AccountMenuRow(symbol: .settings, title: "Advertising privacy")
+                            }
+                            rowDivider
                         }
                     }
-                }.background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 22))
-                    .buttonStyle(PressStyle()).disabled(unavailable)
+                    .buttonStyle(PressStyle())
+                    .disabled(unavailable)
+                }
             }
             if let websiteError { ErrorNote(message: websiteError) }
             if let error = ads.error { ErrorNote(message: error) }
@@ -341,31 +372,37 @@ struct AccountSettingsSection: View {
     }
 
     private var rowDivider: some View {
-        Divider().overlay(MicOnStyle.line).padding(.horizontal, 20)
+        Rectangle().fill(MicOnStyle.line)
+            .frame(height: 1)
+            .padding(.leading, 46)
+            .accessibilityHidden(true)
     }
-
 }
 
-// Plain native rows with the original raster navigation glyph.
 private struct AccountMenuRow: View {
+    let symbol: MicOnGlyph
     let title: String
     var detail: String? = nil
-    var destructive = false
     var body: some View {
         HStack(spacing: 12) {
+            Glyph(symbol: symbol, size: 18, tint: MicOnStyle.accent)
+                .frame(width: 28, height: 26)
             VStack(alignment: .leading, spacing: 4) {
-                LocalizedText(title).font(.booth(.subheadline, weight: .medium))
-                    .foregroundStyle(destructive ? MicOnStyle.danger : MicOnStyle.paper)
+                LocalizedText(title).font(.booth(.subheadline, weight: .semibold))
+                    .foregroundStyle(MicOnStyle.paper)
                 if let detail {
                     LocalizedText(detail).font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
                 }
-            }.fixedSize(horizontal: false, vertical: true)
+            }
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Glyph(symbol: .back, size: 12, tint: MicOnStyle.secondary)
+            Glyph(symbol: .back, size: 11, tint: MicOnStyle.secondary)
                 .rotationEffect(.degrees(180)).frame(width: 20, height: 24)
-                .allowsHitTesting(false)
-        }.padding(.horizontal, 18).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-            .contentShape(.interaction, Rectangle())
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 49, alignment: .leading)
+        .contentShape(.interaction, Rectangle())
     }
 }

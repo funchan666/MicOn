@@ -101,10 +101,9 @@ struct MicOnStartupView: View {
 }
 
 enum MicOnTab: Int, CaseIterable, Hashable {
-    case home, discover, library, me
-    var name: String { ["Listen back", "Discover", "Library", "Me"][rawValue] }
-    // Original single-colour tab artwork; the system tab bar tints it.
-    var artwork: String { ["TabHome", "TabDiscover", "TabLibrary", "TabMe"][rawValue] }
+    case home = 0, tools = 1, library = 2, me = 3
+    var name: String { ["Videos", "Tools", "Files", "Me"][rawValue] }
+    var artwork: String { ["GlyphFeed", "TabTools", "GlyphFolder", "TabMe"][rawValue] }
 }
 
 private struct MicOnTabItem: View {
@@ -116,11 +115,13 @@ private struct MicOnTabItem: View {
         } icon: {
             Image(tab.artwork).renderingMode(.template)
         }
+        .accessibilityIdentifier("tab.\(tab.name.lowercased())")
     }
 }
 
 private struct MicOnTabBar: View {
     @Binding var selection: MicOnTab
+    @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var highlight
 
@@ -131,6 +132,7 @@ private struct MicOnTabBar: View {
             }
         }
         .padding(5)
+        .compositingGroup()
         .studioGlass(in: RoundedRectangle(cornerRadius: 25))
         .shadow(color: .black.opacity(0.28), radius: 16, y: 5)
         .frame(maxWidth: 500)
@@ -145,8 +147,8 @@ private struct MicOnTabBar: View {
         return Button { selection = tab } label: {
             VStack(spacing: 4) {
                 TintedArtwork(name: tab.artwork, tint: selected ? MicOnStyle.ink : MicOnStyle.paper)
-                    .frame(width: 26, height: 26)
-                    .frame(width: 46, height: 31)
+                    .frame(width: 22, height: 22)
+                    .frame(width: 46, height: 32)
                     .background {
                         if selected {
                             Capsule().fill(MicOnStyle.accent)
@@ -154,7 +156,7 @@ private struct MicOnTabBar: View {
                         }
                     }
                 LocalizedText(tab.name)
-                    .font(.booth(.caption2, weight: selected ? .semibold : .medium))
+                    .font(.booth(.caption, weight: selected ? .semibold : .medium))
                     .foregroundStyle(selected ? MicOnStyle.paper : MicOnStyle.secondary)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
@@ -165,7 +167,7 @@ private struct MicOnTabBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel(LocalizedStringKey(tab.name))
+        .accessibilityLabel(Text(verbatim: L10n.display(tab.name, language: AppLanguage.from(locale))))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityIdentifier("tab.\(tab.name.lowercased())")
     }
@@ -175,23 +177,36 @@ private extension View {
     func miconTab(_ tab: MicOnTab, systemBar: Bool) -> some View {
         tabItem { MicOnTabItem(tab: tab) }
             .tag(tab)
+            .toolbarBackground(MicOnStyle.mediaBackground, for: .tabBar)
             .toolbar(systemBar ? .visible : .hidden, for: .tabBar)
     }
 }
 
 struct MicOnRootView: View {
+    private struct EditorRoute: Identifiable {
+        let id = UUID()
+        let movie: PracticeRecording?
+        var tool: VideoTool = .studio
+    }
+
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var commerce: CommerceStore
     @EnvironmentObject private var quota: QuotaStore
     @EnvironmentObject private var offline: OfflineStore
+    @EnvironmentObject private var ads: RewardedAds
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.self) private var environment
-    @SceneStorage("root.tab") private var tab: MicOnTab = .home
-    @State private var editing: PracticeRecording?
+    @ScaledMetric(relativeTo: .caption) private var tabLineHeight: CGFloat = 15
+    @SceneStorage("root.fileTab") private var tab: MicOnTab = .home
+    @SceneStorage("home.selectedVideo") private var selectedVideoID: String?
+    @State private var editing: EditorRoute?
+    @State private var showingLessons = false
     @SceneStorage("home.linkDraft") private var linkDraft = ""
-    @State private var libraryFilter = "Saved"
-    @State private var showingTools = false
+    @SceneStorage("library.filter") private var libraryFilter = "Imports"
+    private var currentMovie: PracticeRecording? {
+        library.video(withID: selectedVideoID) ?? library.recentlyOpenedVideos.first ?? library.importedMovies.first
+    }
     var body: some View {
         GeometryReader { container in
             let systemBar = usesSystemTabBar(in: container)
@@ -202,15 +217,14 @@ struct MicOnRootView: View {
         }
         .tint(MicOnStyle.accent)
         .foregroundStyle(.white)
-            .sheet(item: $editing) { EditorSheet(initialMovie: $0) }
-            .sheet(isPresented: $showingTools) {
-                VStack(spacing: 0) {
-                    SheetHeading(title: "Review a singing take") { showingTools = false }
-                    ToolsView()
-                }.miconScreenBackground().modifier(AccountBusyModifier())
+            .sheet(item: $editing) { route in
+                EditorSheet(initialMovie: route.movie, initialTool: route.tool, onOpenVideo: setCurrentVideo)
+            }
+            .fullScreenCover(isPresented: $showingLessons) {
+                DiscoverView(canDismiss: true)
             }
             .overlay(alignment: .top) {
-                if tab != .discover { DownloadCompletionNotice().padding(.top, 8) }
+                DownloadCompletionNotice().padding(.top, 8)
             }
             .task(id: library.downloadsRequest) {
                 guard library.downloadsRequest != nil else { return }
@@ -241,17 +255,24 @@ struct MicOnRootView: View {
 
     private func tabPages(systemBar: Bool) -> some View {
         TabView(selection: $tab) {
-            HomeView(openAccount: { tab = .me }, discover: { tab = .discover }, openTools: { showingTools = true }, link: $linkDraft)
+            HomeView(discover: { showingLessons = true },
+                     editVideo: { movie, tool in editing = EditorRoute(movie: movie, tool: tool) },
+                     pausePlayback: tab != .home || editing != nil || showingLessons || ads.isPresenting,
+                     selectedVideoID: $selectedVideoID,
+                     link: $linkDraft)
                 .miconTab(.home, systemBar: systemBar)
-            // Mount the feed only while selected: it owns players and quota admission.
-            Group {
-                if tab == .discover { DiscoverView(onExit: { tab = .home }) }
-                else { MicOnStyle.background.ignoresSafeArea() }
-            }.miconTab(.discover, systemBar: systemBar)
-            LibraryView(edit: { editing = $0 }, filter: $libraryFilter)
+            ToolsView(movie: currentMovie) { movie, tool in
+                editing = EditorRoute(movie: movie, tool: tool)
+            }.miconTab(.tools, systemBar: systemBar)
+            LibraryView(edit: { movie, tool in editing = EditorRoute(movie: movie, tool: tool) },
+                        discover: { showingLessons = true }, onOpenVideo: setCurrentVideo, filter: $libraryFilter)
                 .miconTab(.library, systemBar: systemBar)
             AccountView().miconTab(.me, systemBar: systemBar)
         }
+    }
+
+    private func setCurrentVideo(_ movie: PracticeRecording) {
+        selectedVideoID = movie.id.uuidString
     }
 
     private func usesSystemTabBar(in container: GeometryProxy) -> Bool {
@@ -260,7 +281,7 @@ struct MicOnRootView: View {
         if environment.toolbarVerticalEdge != nil { return true }
         // Only a fold or camera region touching the dock needs to change the bar.
         let width = min(container.size.width, 528)
-        let height = min(container.size.height, 88)
+        let height = min(container.size.height, 62 + 2 * tabLineHeight)
         let dock = CGRect(x: (container.size.width - width) / 2, y: container.size.height - height,
                           width: width, height: height)
         let regions = container.reservedRegions(kind: .division) + container.reservedRegions(kind: .occlusion)
@@ -270,7 +291,6 @@ struct MicOnRootView: View {
 
 // A network recovery surface, not a second login or consent gate.
 struct ConnectionPanel: View {
-    var showsArtwork = true
     @EnvironmentObject private var api: APIClient
     @State private var error: String?
     @State private var connecting = false
@@ -278,12 +298,11 @@ struct ConnectionPanel: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            if showsArtwork { BoothArtwork(kind: .studio, height: 170) }
             if let error {
-                MessagePanel(title: "Let’s reconnect.", message: error)
+                MessagePanel(title: "Couldn’t connect", message: error)
                 ActionButton(title: "Try again", busy: connecting) { attempt += 1 }
             } else {
-                AccountLoadingIndicator(title: "Setting up your practice room…")
+                AccountLoadingIndicator(title: "Connecting to MicOn…")
             }
             PolicyLinks()
         }

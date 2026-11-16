@@ -33,13 +33,9 @@ struct MembershipView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                membershipIntro
-                membershipDetails
-            }
+            membershipDetails
         }
-        .scrollClipDisabled()
-        .miconScreenBackground().foregroundStyle(.white)
+        .miconScreenBackground(MicOnStyle.mediaBackground).foregroundStyle(.white)
         .task {
             async let rights: Void = commerce.refresh()
             await commerce.loadPlans()
@@ -66,124 +62,175 @@ struct MembershipView: View {
     }
 
     private var membershipDetails: some View {
-        VStack(alignment: .leading, spacing: 20) {
-                if exportRequired {
-                    LocalizedText("Export is included with Plus.")
-                        .font(.booth(.subheadline, weight: .semibold)).foregroundStyle(MicOnStyle.paper)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if commerce.premium {
-                    VStack(alignment: .leading, spacing: 10) {
-                        LocalizedText("Your membership is active").font(.booth(.headline))
-                        if let expiration = commerce.expiration {
-                            LocalizedText("Access through \(expiration.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))).")
-                                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                        }
-                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MicOnStyle.raised, in: RoundedRectangle(cornerRadius: 16))
-                    renewalDisclosure
-                } else {
-                    if api.session == nil { ConnectionPanel(showsArtwork: false) }
-                    if !plans.isEmpty { planPicker }
-                    if let error = commerce.plansError {
-                        ErrorNote(message: error)
-                        Button("Retry") { Task { await commerce.loadPlans() } }
-                            .buttonStyle(CompactActionStyle()).disabled(interactionLocked)
-                    }
-                    renewalDisclosure
-                    VStack(spacing: 12) {
-                        purchaseAction
-                        if purchasing {
-                            loadingMark(width: 42)
-                        }
-                    }
-                }
-
-                restoreLink
-
-                if attemptedPurchaseAction {
-                    if let error = commerce.error { ErrorNote(message: error) }
-                    if let message = commerce.message {
-                        LocalizedText(message).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.accent)
-                    }
-                }
-
-                PolicyLinks(compact: true)
-
-                if !exportRequired, !commerce.premium, api.session != nil { rewardOption }
+        let rewardsFirst = rewardKind != nil || AllowanceKind.allCases.contains {
+            quota.canRequestReward(for: $0, premium: commerce.premium)
+        }
+        return VStack(alignment: .leading, spacing: 24) {
+            membershipIntro
+            if !commerce.premium, api.session == nil { ConnectionPanel() }
+            subscriptionPanel
+            if rewardsFirst { availableRewards }
+            membershipBenefits
+            if !rewardsFirst { availableRewards }
         }.miconPage()
     }
 
-    private var purchaseButtonTitle: String {
-        if commerce.loadingProducts || commerce.loadingPlans { return "Checking with Apple…" }
-        if commerce.preparingPurchase { return "Preparing your subscription…" }
-        if commerce.busy { return "Confirming your purchase…" }
-        return "Subscribe"
-    }
-
     private var membershipIntro: some View {
-        StudioCover(artwork: "PlusArtwork", height: 218...366, ratio: 1.19) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    LocalizedText("Plus").font(.booth(.subheadline, weight: .bold))
-                        .foregroundStyle(MicOnStyle.paper)
-                    Spacer(minLength: 8)
-                    IconButton(symbol: .close, label: "Close") {
-                        cancelRewardRequest()
-                        dismiss()
-                    }
-                    .studioGlass(in: Circle())
-                    .disabled(purchasing || ads.isPresenting)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                MediaTitle(title: "Plus", tint: MicOnStyle.accent)
+                Spacer(minLength: 0)
+                IconButton(symbol: .close, label: "Close") {
+                    cancelRewardRequest()
+                    dismiss()
                 }
-                Spacer(minLength: 50)
-                CoverTitle(title: "Booth pass", size: 64)
-                LocalizedText("Unlimited views, downloads and media exports.")
-                    .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.paper)
+                .disabled(purchasing || ads.isPresenting)
+                .studioGlass(in: Circle())
+                .accessibilitySortPriority(1)
+            }
+            if !commerce.premium {
+                LocalizedText(exportRequired ? "Export is included with Plus." :
+                              "Export video and audio. Unlimited lesson views and downloads.")
+                    .font(.booth(.subheadline))
+                    .foregroundStyle(MicOnStyle.mist)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
+    private var subscriptionPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if commerce.premium {
+                activeMembership
+            } else {
+                MediaTitle(title: "Choose a plan", textStyle: .title2)
+                if !plans.isEmpty { planPicker }
+                if let error = commerce.plansError {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ErrorNote(message: error)
+                        Button { Task { await commerce.loadPlans() } } label: { LocalizedText("Retry") }
+                            .buttonStyle(CompactActionStyle())
+                            .disabled(interactionLocked)
+                    }
+                }
+            }
+            if !commerce.premium {
+                renewalDisclosure
+                if commerce.plansError == nil || selectedPlan != nil { purchaseAction }
+            }
+
+            if attemptedPurchaseAction {
+                if let error = commerce.error { ErrorNote(message: error) }
+                if let message = commerce.message {
+                    LocalizedText(message)
+                        .font(.booth(.subheadline))
+                        .foregroundStyle(MicOnStyle.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            restoreButton
+            PolicyLinks(compact: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .studioGlass(in: RoundedRectangle(cornerRadius: 26))
+    }
+
+    private var activeMembership: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Glyph(symbol: .sound, size: 20, tint: MicOnStyle.ink)
+                .frame(width: 44, height: 44)
+                .background(MicOnStyle.accent, in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 4) {
+                MediaTitle(title: "Plus active", textStyle: .title2)
+                if let expiration = commerce.expiration {
+                    let date = expiration.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))
+                    LocalizedText("Access through %@.", date)
+                        .font(.booth(.subheadline))
+                        .foregroundStyle(MicOnStyle.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var planPicker: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 275 : 142), spacing: 10, alignment: .top)],
-            alignment: .leading, spacing: 10
-        ) {
+        VStack(spacing: 4) {
             ForEach(plans, id: \.productIdentifier) { plan in
                 planOption(plan)
             }
         }
+        .padding(5)
+        .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 18))
     }
 
     private func planOption(_ product: SKProduct) -> some View {
         let selected = selectedPlan?.productIdentifier == product.productIdentifier
         let price = commerce.price(product)
         let period = commerce.period(product, locale: locale)
-        return Button { selectedID = product.productIdentifier } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    TintedArtwork(name: "TabHome", tint: selected ? MicOnStyle.ink : MicOnStyle.accent)
-                        .frame(width: 23, height: 18)
-                        .frame(width: 37, height: 29)
-                        .background(selected ? MicOnStyle.accent : MicOnStyle.surface, in: Capsule())
-                    Spacer(minLength: 0)
+        let title = VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if let cycle = product.subscriptionPeriod, cycle.numberOfUnits == 1, cycle.unit == .month {
+                    LocalizedText("Monthly")
+                } else if let cycle = product.subscriptionPeriod, cycle.numberOfUnits == 1, cycle.unit == .year {
+                    LocalizedText("Yearly")
+                } else {
+                    Text(verbatim: product.localizedTitle)
                 }
-                Text(verbatim: product.localizedTitle).font(.booth(.subheadline, weight: .semibold))
-                Text(verbatim: price).environment(\.layoutDirection, .leftToRight)
-                    .font(.booth(.title2, weight: .semibold)).monospacedDigit().foregroundStyle(MicOnStyle.accent)
-                LocalizedText("Billed every %@", period).font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
-            }.fixedSize(horizontal: false, vertical: true)
-                .padding(13).frame(maxWidth: .infinity, minHeight: 135, alignment: .topLeading)
+            }.font(.booth(.subheadline, weight: .semibold))
                 .foregroundStyle(MicOnStyle.paper)
-                .studioGlass(in: RoundedRectangle(cornerRadius: 17))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 17).strokeBorder(selected ? MicOnStyle.accent : .clear)
-                        .allowsHitTesting(false)
+            if !period.isEmpty {
+                LocalizedText("Billed every %@", period)
+                    .font(.booth(.footnote))
+                    .foregroundStyle(MicOnStyle.secondary)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        let amount = Text(verbatim: price)
+            .environment(\.layoutDirection, .leftToRight)
+            .font(.booth(.title2, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(selected ? MicOnStyle.accent : MicOnStyle.paper)
+            .fixedSize(horizontal: false, vertical: true)
+
+        return Button { selectedID = product.productIdentifier } label: {
+            HStack(spacing: 12) {
+                TintedArtwork(name: "TabHome", tint: MicOnStyle.ink)
+                    .frame(width: 16, height: 12)
+                    .opacity(selected ? 1 : 0)
+                    .frame(width: 26, height: 26)
+                    .background(selected ? MicOnStyle.accent : .clear, in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(selected ? .clear : MicOnStyle.secondary.opacity(0.7), lineWidth: 1)
+                            .allowsHitTesting(false)
+                    }
+                    .accessibilityHidden(true)
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        title
+                        Spacer(minLength: 0)
+                        amount
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        title
+                        amount
+                    }
                 }
-                .contentShape(Rectangle())
-        }.buttonStyle(PressStyle()).disabled(interactionLocked)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityIdentifier("membership.plan.\(product.productIdentifier)")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(selected ? MicOnStyle.raised : .clear, in: RoundedRectangle(cornerRadius: 14))
+            .contentShape(.interaction, RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(PressStyle())
+        .disabled(interactionLocked)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("membership.plan.\(product.productIdentifier)")
     }
 
     private var renewalDisclosure: some View {
@@ -194,20 +241,83 @@ struct MembershipView: View {
 
     private var purchaseAction: some View {
         Button(action: subscribe) {
-            HStack(spacing: 10) {
-                Glyph(symbol: .sound, size: 18, tint: MicOnStyle.accent)
-                    .frame(width: 36, height: 36)
-                    .background(MicOnStyle.ink, in: Capsule()).accessibilityHidden(true)
-                LocalizedText(purchaseButtonTitle).font(.booth(.headline, display: true))
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-            }.padding(.horizontal, 12).padding(.vertical, 8)
-                .frame(maxWidth: .infinity, minHeight: 54)
-                .foregroundStyle(MicOnStyle.ink)
-                .background(MicOnStyle.accent, in: RoundedRectangle(cornerRadius: 18))
-                .contentShape(Rectangle())
-        }.buttonStyle(PressStyle())
-            .disabled(interactionLocked || selectedPlan == nil)
-            .accessibilityIdentifier("membership.subscribe")
+            HStack(spacing: 8) {
+                if purchasing || commerce.loadingProducts || commerce.loadingPlans {
+                    loadingMark(width: 32, tint: MicOnStyle.ink)
+                }
+                LocalizedText(purchaseButtonTitle)
+                    .font(.booth(.headline, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .foregroundStyle(MicOnStyle.ink)
+            .background(MicOnStyle.accent, in: Capsule())
+            .contentShape(.interaction, Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(interactionLocked || selectedPlan == nil)
+        .accessibilityIdentifier("membership.subscribe")
+    }
+
+    private var purchaseButtonTitle: String {
+        if commerce.loadingProducts || commerce.loadingPlans { return "Checking with Apple…" }
+        if commerce.preparingPurchase { return "Preparing your subscription…" }
+        if commerce.busy { return "Confirming your purchase…" }
+        return "Subscribe"
+    }
+
+    private var membershipBenefits: some View {
+        let layout: GridItem.Size = typeSize.isAccessibilitySize ? .flexible() : .adaptive(minimum: 234)
+        return VStack(alignment: .leading, spacing: 16) {
+            MediaTitle(title: "Plus benefits", textStyle: .title2, tint: MicOnStyle.ink)
+            LazyVGrid(
+                columns: [GridItem(layout, spacing: 24, alignment: .topLeading)],
+                alignment: .leading, spacing: 20
+            ) {
+                benefit(.edit, "Export edited clips",
+                        "Save or share your edits as MP4 at up to 1080p.")
+                benefit(.sound, "Export audio as M4A",
+                        "Save the audio track separately from the video.")
+                benefit(.play, "Unlimited lesson views",
+                        "Watch lessons by link, code or in the lesson feed.")
+                benefit(.download, "Unlimited lesson downloads",
+                        "Save lessons to your library for offline practice.")
+                benefit(.mute, "No launch ads",
+                        "Skip the ad when you switch back to MicOn, too.")
+                benefit(.feed, "Export supported lessons",
+                        "Keep a video file you can open outside MicOn.")
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MicOnStyle.paper, in: RoundedRectangle(cornerRadius: 24))
+    }
+
+    private func benefit(_ symbol: MicOnGlyph, _ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle()
+                .fill(MicOnStyle.paperSecondary.opacity(0.25))
+                .frame(height: 1)
+                .accessibilityHidden(true)
+            HStack(alignment: .top, spacing: 10) {
+                Glyph(symbol: symbol, size: 19, tint: MicOnStyle.ink)
+                    .frame(width: 23, height: 24)
+                VStack(alignment: .leading, spacing: 4) {
+                    LocalizedText(title)
+                        .font(.booth(.subheadline, weight: .semibold))
+                        .foregroundStyle(MicOnStyle.ink)
+                    LocalizedText(detail)
+                        .font(.booth(.footnote))
+                        .foregroundStyle(MicOnStyle.paperSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
     }
 
     private func subscribe() {
@@ -219,9 +329,13 @@ struct MembershipView: View {
         }
     }
 
+    @ViewBuilder private var availableRewards: some View {
+        if !exportRequired, !commerce.premium, api.session != nil { rewardOption }
+    }
+
     private var rewardOption: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LocalizedText("Or, keep it free").font(.booth(.headline))
+            LocalizedText("Ad rewards").font(.booth(.headline))
             ForEach(rewardKind.map { [$0] } ?? AllowanceKind.allCases) { kind in
                 if quota.canRequestReward(for: kind, premium: commerce.premium) {
                     LocalizedText(quota.rewardSummary(for: kind)).font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
@@ -242,10 +356,14 @@ struct MembershipView: View {
                         .buttonStyle(CompactActionStyle())
                 }
             }
-            LocalizedText(quota.unlimited ? "Unlimited views today" : "\(quota.watchesLeft) views left today")
-            LocalizedText(quota.downloadsUnlimited ? "Unlimited downloads today" : "\(quota.downloadsLeft) downloads left today")
-            AllowanceResetText()
-            LocalizedText("Ad rewards unlock when the corresponding allowance runs out.")
+            if quota.usage != nil {
+                LocalizedText(quota.unlimited ? "Unlimited views today" : "\(quota.watchesLeft) views left today")
+                LocalizedText(quota.downloadsUnlimited ? "Unlimited downloads today" : "\(quota.downloadsLeft) downloads left today")
+                AllowanceResetText()
+            } else if quota.error == nil {
+                LocalizedText("Loading…").foregroundStyle(MicOnStyle.secondary)
+            }
+            LocalizedText("When you run out of views or downloads, watch an ad to get more.")
                 .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary).fixedSize(horizontal: false, vertical: true)
             if let error = ads.error { ErrorNote(message: error) }
             if let error = quota.error { ErrorNote(message: error) }
@@ -262,9 +380,9 @@ struct MembershipView: View {
         ads.cancelRewardLoading()
     }
 
-    private func loadingMark(width: CGFloat) -> some View {
+    private func loadingMark(width: CGFloat, tint: Color = MicOnStyle.accent) -> some View {
         Image("MicOnLoadingMark").renderingMode(.template).resizable().scaledToFit()
-            .foregroundStyle(MicOnStyle.accent)
+            .foregroundStyle(tint)
             .frame(width: width, height: 14)
             .phaseAnimator([false, true]) { content, dimmed in
                 content.opacity(reduceMotion || scenePhase != .active ? 1 : (dimmed ? 0.35 : 1))
@@ -274,25 +392,18 @@ struct MembershipView: View {
             .accessibilityHidden(true)
     }
 
-    private var restoreLink: some View {
-        Button {
+    private var restoreButton: some View {
+        ActionButton(title: "Restore purchases", primary: false) {
             attemptedPurchaseAction = true
             commerce.restore()
-        } label: {
-            LocalizedText("Restore purchases")
-                .font(.booth(.subheadline, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .frame(minHeight: 44)
-                .foregroundStyle(MicOnStyle.accent)
-                .background(MicOnStyle.raised, in: Capsule())
-                .contentShape(Rectangle())
-        }.disabled(interactionLocked).buttonStyle(PressStyle())
-            .accessibilityIdentifier("membership.restore")
+        }
+        .disabled(interactionLocked)
+        .accessibilityIdentifier("membership.restore")
     }
 }
 
 struct AccountView: View {
+    @Environment(\.locale) private var locale
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var commerce: CommerceStore
     @EnvironmentObject private var quota: QuotaStore
@@ -305,100 +416,175 @@ struct AccountView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                accountCover
-                VStack(alignment: .leading, spacing: 24) {
-                    if api.session != nil {
-                        membershipCard
-                        allowance
-                        Divider().overlay(MicOnStyle.line)
-                    } else { ConnectionPanel(showsArtwork: false) }
-                    AccountSettingsSection()
-                    LocalizedText("Version \(api.configuration.version)")
-                        .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-                        .padding(.top, 4)
-                }.miconPage()
-            }
-        }.scrollClipDisabled()
-            .miconScreenBackground().foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 24) {
+                accountHeader
+                if api.session != nil {
+                    membershipCard
+                    allowance
+                } else {
+                    ConnectionPanel()
+                }
+                AccountSettingsSection()
+                LocalizedText("Version %@", api.configuration.version)
+                    .font(.booth(.caption))
+                    .foregroundStyle(MicOnStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.miconPage()
+        }
+            .miconScreenBackground(MicOnStyle.mediaBackground).foregroundStyle(MicOnStyle.paper)
             .sheet(isPresented: $paywall) { MembershipView() }
     }
 
-    private var accountCover: some View {
-        StudioCover(artwork: "AccountCover", height: 178...322, ratio: 1.26) {
-            VStack(alignment: .leading, spacing: 8) {
-                CoverTitle(title: "Your practice space", size: 55)
-                if let session = api.session {
-                    LocalizedText("ID · \(session.userId.value)").font(.booth(.footnote)).monospacedDigit()
-                        .foregroundStyle(MicOnStyle.secondary)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    accountStatus
-                }
+    private var accountHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MediaTitle(title: "Account")
+            if let session = api.session {
+                LocalizedText(commerce.premium ? "Plus active" : "Free plan")
+                    .font(.booth(.footnote, weight: .semibold))
+                    .foregroundStyle(commerce.premium ? MicOnStyle.accent : MicOnStyle.mist)
+                LocalizedText("ID · %@", session.userId.value)
+                    .font(.booth(.footnote))
+                    .monospacedDigit()
+                    .foregroundStyle(MicOnStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
-    }
-
-    private var accountStatus: some View {
-        LocalizedText(commerce.premium ? "Plus active" : "Free plan")
-            .font(.booth(.caption, weight: .semibold))
-            .foregroundStyle(commerce.premium ? MicOnStyle.accent : MicOnStyle.secondary)
     }
 
     private var membershipCard: some View {
         Button { paywall = true } label: {
-            HStack(alignment: .center, spacing: 16) {
-                membershipCopy.frame(maxWidth: .infinity, alignment: .leading)
-                Glyph(symbol: .back, size: 16, tint: MicOnStyle.ink)
-                    .rotationEffect(.degrees(180))
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    MediaTitle(title: "Plus", textStyle: .title2, tint: MicOnStyle.ink)
+                    Spacer(minLength: 0)
+                    TintedArtwork(name: "TabHome", tint: MicOnStyle.ink)
+                        .frame(width: 27, height: 20)
+                        .frame(width: 48, height: 48)
+                        .background(MicOnStyle.mist, in: Circle())
+                        .accessibilityHidden(true)
+                }
+                if commerce.premium, let expiration = commerce.expiration {
+                    let date = expiration.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted).locale(locale))
+                    LocalizedText("Access through %@.", date)
+                        .font(.booth(.footnote))
+                        .foregroundStyle(MicOnStyle.ink)
+                } else {
+                    LocalizedText("Export video and audio. Unlimited lesson views and downloads.")
+                        .font(.booth(.footnote))
+                        .foregroundStyle(MicOnStyle.ink)
+                }
+                HStack(spacing: 8) {
+                    LocalizedText(commerce.premium ? "View membership" : "See plans")
+                        .font(.booth(.subheadline, weight: .semibold))
+                    Glyph(symbol: .back, size: 13, tint: MicOnStyle.ink)
+                        .rotationEffect(.degrees(180))
+                }
+                .foregroundStyle(MicOnStyle.ink)
             }
-            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            .background(MicOnStyle.paper, in: RoundedRectangle(cornerRadius: 20))
-            .contentShape(.interaction, RoundedRectangle(cornerRadius: 20))
-        }.buttonStyle(PressStyle()).disabled(unavailable)
-            .accessibilityIdentifier("account.membership")
-    }
-
-    private var membershipCopy: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            LocalizedText(commerce.premium ? "Your all-access pass." : "Go further with Plus.")
-                .font(.booth(.title3, weight: .semibold)).foregroundStyle(MicOnStyle.ink)
-            LocalizedText("Unlimited views. Unlimited downloads.")
-                .font(.booth(.footnote)).foregroundStyle(MicOnStyle.paperSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            LocalizedText(commerce.premium ? "Manage membership" : "Explore plans")
-                .font(.booth(.footnote, weight: .semibold)).foregroundStyle(MicOnStyle.ink)
-        }.fixedSize(horizontal: false, vertical: true)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(18)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+            .background(MicOnStyle.accent, in: RoundedRectangle(cornerRadius: 24))
+            .contentShape(.interaction, RoundedRectangle(cornerRadius: 24))
+        }
+        .buttonStyle(PressStyle())
+        .disabled(unavailable)
+        .accessibilityIdentifier("account.membership")
     }
 
     private var allowance: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                LocalizedText("Today").font(.booth(.headline))
-                Spacer()
-                if !commerce.premium {
-                    Button("Get more") { paywall = true }
-                        .font(.booth(.footnote, weight: .semibold)).foregroundStyle(MicOnStyle.accent)
-                        .frame(minHeight: 44).buttonStyle(PressStyle()).disabled(unavailable)
-                        .accessibilityLabel("Get more daily views and downloads")
+        let title = MediaTitle(title: "Today’s online allowance", textStyle: .title2)
+        return VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    title
+                    Spacer(minLength: 0)
+                    if !commerce.premium { allowanceAction }
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    title
+                    if !commerce.premium { allowanceAction }
                 }
             }
-            HStack(alignment: .top, spacing: 20) {
-                balance(value: commerce.premium || quota.unlimited ? "Unlimited" : "\(quota.watchesLeft)", label: "Views left")
-                balance(value: commerce.premium || quota.downloadsUnlimited ? "Unlimited" : "\(quota.downloadsLeft)", label: "Downloads left")
+
+            if commerce.premium || quota.usage != nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) { allowanceBalances }
+                    VStack(alignment: .leading, spacing: 14) { allowanceBalances }
+                }
+            } else if quota.error == nil {
+                LocalizedText("Loading…")
+                    .font(.booth(.subheadline))
+                    .foregroundStyle(MicOnStyle.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if commerce.premium {
-                LocalizedText("Included with your membership").font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-            } else { AllowanceResetText() }
+
+            if !commerce.premium, let error = quota.error {
+                ErrorNote(message: error)
+            } else if !commerce.premium, quota.usage != nil {
+                AllowanceResetText()
+            }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .studioGlass(in: RoundedRectangle(cornerRadius: 24))
     }
 
-    private func balance(value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LocalizedText(value).font(value == "Unlimited" ? .headline : .title.weight(.semibold))
-                .monospacedDigit().foregroundStyle(MicOnStyle.paper)
-                .fixedSize(horizontal: false, vertical: true)
-            LocalizedText(label).font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder private var allowanceBalances: some View {
+        balance(.watch, symbol: .play, label: "Views left")
+        balance(.download, symbol: .download, label: "Downloads left")
+    }
+
+    private var allowanceAction: some View {
+        Button { paywall = true } label: {
+            HStack(spacing: 8) {
+                LocalizedText("Get more")
+                    .font(.booth(.footnote, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Glyph(symbol: .back, size: 11, tint: MicOnStyle.accent)
+                    .rotationEffect(.degrees(180))
+            }
+            .foregroundStyle(MicOnStyle.accent)
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(unavailable)
+        .accessibilityLabel(Text(verbatim: L10n.text(
+            "Get more daily views and downloads", language: AppLanguage.from(locale)
+        )))
+    }
+
+    private func balance(_ kind: AllowanceKind, symbol: MicOnGlyph, label: String) -> some View {
+        let unlimited = commerce.premium || quota.isUnlimited(kind)
+        return VStack(alignment: .leading, spacing: 8) {
+            Rectangle()
+                .fill(MicOnStyle.line)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+            HStack(alignment: .top, spacing: 6) {
+                Glyph(symbol: symbol, size: 14, tint: MicOnStyle.accent)
+                    .frame(width: 18, height: 20)
+                LocalizedText(label)
+                    .font(.booth(.footnote, weight: .medium))
+                    .foregroundStyle(MicOnStyle.secondary)
+            }
+            Group {
+                if unlimited {
+                    LocalizedText("Unlimited").font(.booth(.headline))
+                } else {
+                    Text(verbatim: quota.remaining(kind).formatted(.number.grouping(.never).locale(locale)))
+                        .font(.booth(.largeTitle, weight: .semibold))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(MicOnStyle.paper)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -414,11 +600,11 @@ struct LuckyRewardView: View {
                     BoothArtwork(kind: .pass, height: 108)
                         .scaleEffect(appeared || reduceMotion ? 1 : 0.88)
                         .accessibilityHidden(true)
-                    LocalizedText("A little luck, on us").font(.booth(.headline)).foregroundStyle(.white)
+                    LocalizedText("Bonus added").font(.booth(.headline)).foregroundStyle(.white)
                     LocalizedText("No ad is available right now. \(message)")
                         .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
                         .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
-                    ActionButton(title: "Keep exploring", action: dismiss)
+                    ActionButton(title: "Done", action: dismiss)
                 }.padding(20).frame(maxWidth: 360)
                     .background(MicOnStyle.surface, in: RoundedRectangle(cornerRadius: 28))
                     .padding(24).frame(maxWidth: .infinity, minHeight: geometry.size.height)

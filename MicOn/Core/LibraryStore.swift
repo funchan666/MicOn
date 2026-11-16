@@ -23,13 +23,32 @@ final class LibraryStore: ObservableObject {
             }
         } catch {
             readable = false
-            self.error = "Your local library could not be read. Existing files have been preserved."
+            self.error = loadError
         }
     }
     var movies: [PracticeRecording] { snapshot.movies }
+    var importedMovies: [PracticeRecording] { movies.filter { !$0.isExport && !$0.isAudio } }
+    var recentlyOpenedVideos: [PracticeRecording] {
+        movies
+            .filter { !$0.isAudio && $0.lastOpenedAt != nil }
+            .sorted { ($0.lastOpenedAt ?? $0.date) > ($1.lastOpenedAt ?? $1.date) }
+    }
     var favorites: [LessonClip] { snapshot.favorites }
     var history: [LessonLinkVisit] { snapshot.history }
+    var loadError: String? {
+        readable ? nil : "Your local library could not be read. Existing files have been preserved."
+    }
     func url(for movie: PracticeRecording) -> URL { root.appendingPathComponent(movie.filename) }
+    func video(withID id: String?) -> PracticeRecording? {
+        guard let id else { return nil }
+        return movies.first { !$0.isAudio && $0.id.uuidString == id }
+    }
+    func recordOpened(_ id: UUID) {
+        guard let index = snapshot.movies.firstIndex(where: { $0.id == id && !$0.isAudio }) else { return }
+        var next = snapshot
+        next.movies[index].lastOpenedAt = Date()
+        save(next)
+    }
     // Internal IDs stay stable; only the user-facing shared copy gets a readable name.
     func shareFile(for movie: PracticeRecording, commerce: CommerceStore) async throws -> URL {
         try commerce.requireMediaExport()
@@ -102,7 +121,8 @@ final class LibraryStore: ObservableObject {
         next.history.removeAll { $0.id == visit.id }
         save(next)
     }
-    func importMovie(_ source: URL, exported: Bool = false, title: String? = nil) async throws -> PracticeRecording {
+    func importMovie(_ source: URL, exported: Bool = false, title: String? = nil,
+                     beforeSave: () throws -> Void = {}) async throws -> PracticeRecording {
         guard readable else { throw MicOnError.storage }
         let id = UUID()
         let ext = source.pathExtension.lowercased().nilIfBlank ?? "mov"
@@ -110,16 +130,27 @@ final class LibraryStore: ObservableObject {
                               title: title ?? source.deletingPathExtension().lastPathComponent,
                               date: Date(), isExport: exported)
         let destination = url(for: item)
-        try await Task.detached(priority: .userInitiated) {
+        let copy = Task.detached(priority: .userInitiated) {
             let access = source.startAccessingSecurityScopedResource()
             defer { if access { source.stopAccessingSecurityScopedResource() } }
             try FileManager.default.copyItem(at: source, to: destination)
-        }.value
-        var next = snapshot
-        next.movies.insert(item, at: 0)
-        do { try persist(next) }
-        catch { try? FileManager.default.removeItem(at: destination); throw error }
+        }
+        do {
+            try await copy.value
+            try Task.checkCancellation()
+            try beforeSave()
+            var next = snapshot
+            next.movies.insert(item, at: 0)
+            try persist(next)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
         return item
+    }
+    func importMovie(_ movie: ImportedMovie) async throws -> PracticeRecording {
+        defer { try? FileManager.default.removeItem(at: movie.url) }
+        return try await importMovie(movie.url, title: movie.title)
     }
     func delete(_ movie: PracticeRecording) {
         // Commit index removal first; a failed file deletion leaves an orphan, not a broken library entry.
@@ -138,21 +169,21 @@ final class LibraryStore: ObservableObject {
         guard readable else { throw MicOnError.storage }
         let data = try JSONEncoder().encode(next)
         try data.write(to: snapshotURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        let saved = try Data(contentsOf: snapshotURL)
-        guard saved == data else { throw MicOnError.storage }
         snapshot = next
     }
 }
 
 struct ImportedMovie: Transferable {
     let url: URL
+    let title: String
     static var transferRepresentation: some TransferRepresentation {
         FileRepresentation(contentType: .movie) { movie in SentTransferredFile(movie.url) }
         importing: { received in
             let ext = received.file.pathExtension.nilIfBlank ?? "mov"
             let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             try FileManager.default.copyItem(at: received.file, to: copy)
-            return ImportedMovie(url: copy)
+            let title = received.file.deletingPathExtension().lastPathComponent.nilIfBlank ?? "Imported video"
+            return ImportedMovie(url: copy, title: title)
         }
     }
 }

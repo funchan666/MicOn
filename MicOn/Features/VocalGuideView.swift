@@ -56,25 +56,23 @@ private struct VocalNote: Identifiable {
     ]
 }
 
-// Shared entry point for Home and the Practice tab.
+// Shared entry point for Home and the practice tools.
 struct VocalGuideEntry: View {
-    var compact = false
     let open: () -> Void
     var body: some View {
         Button(action: open) {
-            HStack(spacing: 18) {
-                GuideArtwork(subject: .breath).frame(width: compact ? 72 : 94, height: compact ? 88 : 116)
-                VStack(alignment: .leading, spacing: 8) {
-                    LocalizedText("Karaoke field notes").font(.booth(.headline))
+            HStack(spacing: 13) {
+                Glyph(symbol: .library, size: 19, tint: MicOnStyle.accent).frame(width: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    LocalizedText("Karaoke guide").font(.booth(.headline))
                         .foregroundStyle(MicOnStyle.paper)
-                    LocalizedText("\(VocalNote.all.count) short reads · Available offline")
+                    LocalizedText("%@ tips available offline", String(VocalNote.all.count))
                         .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
                 }.fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Glyph(symbol: .back, size: 14, tint: MicOnStyle.accent)
-                    .rotationEffect(.degrees(180)).frame(width: 20)
-            }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .background { BoothSurface(tone: .plum) }
+                Glyph(symbol: .back, size: 12, tint: MicOnStyle.accent).rotationEffect(.degrees(180))
+            }.padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
                 .contentShape(Rectangle())
         }.buttonStyle(PressStyle()).accessibilityIdentifier("vocalGuide.open")
     }
@@ -90,23 +88,20 @@ struct VocalGuideView: View {
     }
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                SheetHeading(title: "Karaoke field notes") { dismiss() }
-                ScrollView {
+            ScrollView {
+                VStack(spacing: 0) {
+                    StudioCover(artwork: GuideArtwork.Subject.breath.rawValue, height: 134...202, ratio: 1.85,
+                                backdrop: MicOnStyle.mediaBackground, artworkSaturation: 0.45) {
+                        CoverTitle(title: "Karaoke guide", size: 47).padding(.top, 50)
+                    }
                     VStack(alignment: .leading, spacing: 20) {
                         ChoiceStrip(values: categories, selected: category) { category = $0 }
                         if let first = notes.first {
                             NavigationLink(value: first.id) {
-                                ViewThatFits(in: .horizontal) {
-                                    HStack(spacing: 20) {
-                                        GuideArtwork(subject: first.cover).frame(width: 148, height: 148)
-                                        featuredCopy(first).frame(minWidth: 112, maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    VStack(alignment: .leading, spacing: 14) {
-                                        GuideArtwork(subject: first.cover).aspectRatio(1.4, contentMode: .fit)
-                                        featuredCopy(first)
-                                    }
-                                }.padding(14).foregroundStyle(MicOnStyle.ink)
+                                HStack(spacing: 14) {
+                                    featuredCopy(first).frame(maxWidth: .infinity, alignment: .leading)
+                                    Glyph(symbol: .back, size: 14, tint: MicOnStyle.ink).rotationEffect(.degrees(180))
+                                }.padding(18).foregroundStyle(MicOnStyle.ink)
                                     .background { BoothSurface(tone: .blush) }
                                     .contentShape(Rectangle())
                             }.buttonStyle(PressStyle()).accessibilityIdentifier("vocalGuide.\(first.id)")
@@ -115,7 +110,9 @@ struct VocalGuideView: View {
                             ForEach(Array(notes.dropFirst())) { note in
                                 NavigationLink(value: note.id) {
                                     VStack(alignment: .leading, spacing: 12) {
-                                        GuideArtwork(subject: note.cover).aspectRatio(1, contentMode: .fit)
+                                        GuideArtwork(subject: note.cover)
+                                            .aspectRatio(1.65, contentMode: .fit)
+                                            .saturation(0.55)
                                         LocalizedText(note.shortTitle).font(.booth(.headline))
                                             .fixedSize(horizontal: false, vertical: true)
                                         LocalizedText(note.summary).font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
@@ -124,9 +121,11 @@ struct VocalGuideView: View {
                                 }.buttonStyle(PressStyle()).accessibilityIdentifier("vocalGuide.\(note.id)")
                             }
                         }
-                    }.miconPage()
+                    }.studioPage()
                 }
-            }.miconScreenBackground().foregroundStyle(MicOnStyle.paper)
+            }.scrollClipDisabled()
+                .studioCoverControl { IconButton(symbol: .close, label: "Close") { dismiss() } }
+                .miconScreenBackground(MicOnStyle.mediaBackground).foregroundStyle(MicOnStyle.paper)
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: String.self) { id in
                     if let note = VocalNote.all.first(where: { $0.id == id }) {
@@ -150,20 +149,17 @@ private struct VocalNoteReader: View {
     let note: VocalNote
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                IconButton(symbol: .back, label: "Back to karaoke field notes") { dismiss() }
-                LocalizedText(note.category).font(.booth(.subheadline, weight: .semibold))
-                    .foregroundStyle(MicOnStyle.secondary)
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 16).padding(.top, 8)
-            ScrollView {
+        ScrollView {
+            VStack(spacing: 0) {
+                StudioCover(artwork: note.cover.rawValue, height: 152...224, ratio: 1.68,
+                            backdrop: MicOnStyle.mediaBackground, artworkSaturation: 0.45) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        LocalizedText(note.category).font(.booth(.subheadline, weight: .semibold))
+                            .foregroundStyle(MicOnStyle.accent)
+                        CoverTitle(title: note.title, size: 49)
+                    }.padding(.top, 50)
+                }
                 VStack(alignment: .leading, spacing: 28) {
-                    GuideArtwork(subject: note.cover).aspectRatio(1, contentMode: .fit).frame(maxWidth: 360)
-                    LocalizedText(note.title)
-                        .font(.booth(.title2, display: true))
-                        .foregroundStyle(MicOnStyle.paper).accessibilityAddTraits(.isHeader)
-                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(note.sections.indices, id: \.self) { index in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -183,9 +179,13 @@ private struct VocalNoteReader: View {
                     }.foregroundStyle(MicOnStyle.ink)
                         .padding(22).frame(maxWidth: .infinity, alignment: .leading)
                         .background { BoothSurface(tone: .blush) }
-                }.miconPage()
+                }.studioPage()
             }
-        }.miconScreenBackground().foregroundStyle(MicOnStyle.paper)
+        }.scrollClipDisabled()
+            .studioCoverControl(alignment: .leading) {
+                IconButton(symbol: .back, label: "Back") { dismiss() }
+            }
+            .miconScreenBackground(MicOnStyle.mediaBackground).foregroundStyle(MicOnStyle.paper)
             .toolbar(.hidden, for: .navigationBar)
     }
 }

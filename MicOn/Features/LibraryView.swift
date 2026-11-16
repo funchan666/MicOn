@@ -2,38 +2,36 @@ import SwiftUI
 import AVFoundation
 
 struct LibraryView: View {
+    @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var library: LibraryStore
     @EnvironmentObject private var offline: OfflineStore
     @EnvironmentObject private var commerce: CommerceStore
     @State private var showingExportMembership = false
-    var edit: (PracticeRecording) -> Void
+    var edit: (PracticeRecording?, VideoTool) -> Void
+    var discover: () -> Void
+    var onOpenVideo: (PracticeRecording) -> Void
     @Binding var filter: String
+    @State private var showingFiles = false
     @State private var player: PlayerRoute?
+    @State private var playingMovie: PracticeRecording?
+    @State private var pendingEdit: (movie: PracticeRecording, tool: VideoTool)?
     @State private var sharing: SharedFile?
     @State private var removing: PracticeRecording?
     @State private var removingDownload: OfflineVideo?
     @State private var sharingMovieID: UUID?
     @Environment(\.locale) private var locale
 
-    private var category: Category { Category(rawValue: filter) ?? .saved }
+    private var category: Category { Category(rawValue: filter) ?? .imports }
     private var localMovies: [PracticeRecording] {
         library.movies.filter { $0.isExport == (category == .exports) }
     }
 
-    private enum Category: String, CaseIterable, Identifiable {
-        case saved = "Saved"
-        case offline = "Downloads"
+    private enum Category: String {
         case imports = "Imports"
         case exports = "Exports"
+        case saved = "Saved"
+        case offline = "Downloads"
 
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .saved: "Favorites"
-            case .offline: "Offline videos"
-            case .imports, .exports: rawValue
-            }
-        }
         var glyph: MicOnGlyph {
             switch self {
             case .saved: .bookmark
@@ -45,84 +43,77 @@ struct LibraryView: View {
     }
 
     var body: some View {
+        let total = count(in: category)
         ScrollView {
-            VStack(spacing: 0) {
-                libraryHeader
-                VStack(alignment: .leading, spacing: 24) {
-                    listeningTabs
-                    librarySection
-                }.miconPage()
-            }
-        }.scrollClipDisabled()
-            .miconScreenBackground().sheet(item: $sharing) { ShareSheet(items: [$0.url]) }
+            VStack(alignment: .leading, spacing: 20) {
+                MediaTitle(title: "Files")
+                libraryTabs
+                librarySection(total: total)
+            }.miconPage()
+        }
+            .miconScreenBackground(MicOnStyle.mediaBackground)
+            .sheet(item: $sharing) { ShareSheet(items: [$0.url]) }
             .sheet(isPresented: $showingExportMembership) { MembershipView(exportRequired: true) }
             .fullScreenCover(item: $player) { PlayerScreen(route: $0) }
+            .sheet(item: $playingMovie, onDismiss: openPendingEdit) { movie in
+                LocalVideoSheet(movie: movie) { tool in
+                    pendingEdit = (movie, tool)
+                    playingMovie = nil
+                }
+            }
             .sheet(item: $removingDownload) { video in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        SheetHeading(title: "Remove offline video?") { removingDownload = nil }
-                        Text(verbatim: video.clip.title).font(.booth(.headline)).lineLimit(3)
-                        LocalizedText("This removes only the offline copy. Your favorite stays saved.")
+                        SheetHeading(title: "Remove download?") { removingDownload = nil }
+                        Text(verbatim: video.displayName).font(.booth(.headline)).fixedSize(horizontal: false, vertical: true)
+                        LocalizedText("This removes the downloaded copy. The lesson stays in Favorites if you saved it there.")
                             .foregroundStyle(MicOnStyle.secondary)
                         ActionButton(title: "Remove download", primary: false) {
                             offline.remove(video); removingDownload = nil
                         }
-                        ActionButton(title: "Keep it") { removingDownload = nil }
+                        ActionButton(title: "Keep download") { removingDownload = nil }
                     }.padding(24)
                 }.miconScreenBackground().presentationDetents([.medium, .large])
             }
             .sheet(item: $removing) { movie in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        SheetHeading(title: "Delete this local copy?") { removing = nil }
-                        Text(verbatim: movie.title).font(.booth(.headline))
-                        LocalizedText("The copy in MicOn will be removed. The original in Photos or Files will stay untouched.").foregroundStyle(MicOnStyle.secondary)
+                        SheetHeading(title: "Delete local copy?") { removing = nil }
+                        Text(verbatim: movie.displayName).font(.booth(.headline))
+                        LocalizedText("MicOn deletes its copy. Any original in Photos or Files stays unchanged.").foregroundStyle(MicOnStyle.secondary)
                         ActionButton(title: "Delete local copy") { library.delete(movie); removing = nil }
-                        ActionButton(title: "Keep it", primary: false) { removing = nil }
+                        ActionButton(title: "Cancel", primary: false) { removing = nil }
                     }.padding(24)
                 }.miconScreenBackground().presentationDetents([.medium, .large])
             }
     }
 
-    private var libraryHeader: some View {
-        StudioCover(artwork: "LibraryCover", height: 168...302, ratio: 1.38) {
-            CoverTitle(title: "Listening library")
-        }
-    }
-
-    private var listeningTabs: some View {
+    private var libraryTabs: some View {
         VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) {
-                    listeningTab(.saved)
-                    listeningTab(.offline)
+                    primaryTab(.imports)
+                    primaryTab(.offline)
+                    primaryTab(.exports)
                 }
                 VStack(spacing: 6) {
-                    listeningTab(.saved, multiline: true)
-                    listeningTab(.offline, multiline: true)
+                    primaryTab(.imports, multiline: true)
+                    primaryTab(.offline, multiline: true)
+                    primaryTab(.exports, multiline: true)
                 }
             }.padding(5).studioGlass(in: RoundedRectangle(cornerRadius: 20))
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
-                    localTab(.imports)
-                    localTab(.exports)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    localTab(.imports, multiline: true)
-                    localTab(.exports, multiline: true)
-                }
-            }
+            favoritesTab
             Divider().overlay(MicOnStyle.line)
         }
     }
 
-    private func listeningTab(_ entry: Category, multiline: Bool = false) -> some View {
+    private func primaryTab(_ entry: Category, multiline: Bool = false) -> some View {
         let selected = category == entry
         let ink = selected ? MicOnStyle.ink : MicOnStyle.paper
         return Button { filter = entry.rawValue } label: {
             HStack(spacing: 8) {
                 Glyph(symbol: entry.glyph, size: 16, tint: ink)
-                LocalizedText(entry.title).font(.booth(.subheadline, weight: .semibold))
+                LocalizedText(entry.rawValue).font(.booth(.subheadline, weight: .semibold))
                     .fixedSize(horizontal: !multiline, vertical: true)
             }.padding(.horizontal, 11).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 46)
@@ -132,13 +123,13 @@ struct LibraryView: View {
         }.buttonStyle(PressStyle()).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private func localTab(_ entry: Category, multiline: Bool = false) -> some View {
-        let selected = category == entry
-        return Button { filter = entry.rawValue } label: {
+    private var favoritesTab: some View {
+        let selected = category == .saved
+        return Button { filter = Category.saved.rawValue } label: {
             HStack(spacing: 7) {
-                Glyph(symbol: entry.glyph, size: 15, tint: selected ? MicOnStyle.accent : MicOnStyle.secondary)
-                LocalizedText(entry.title).font(.booth(.subheadline, weight: .semibold))
-                    .fixedSize(horizontal: !multiline, vertical: true)
+                Glyph(symbol: .bookmark, size: 15, tint: selected ? MicOnStyle.accent : MicOnStyle.secondary)
+                LocalizedText("Favorites").font(.booth(.subheadline, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
                     .underline(selected)
             }.padding(.horizontal, 7).padding(.vertical, 6).frame(minHeight: 44)
                 .foregroundStyle(selected ? MicOnStyle.accent : MicOnStyle.paper)
@@ -146,46 +137,52 @@ struct LibraryView: View {
         }.buttonStyle(PressStyle()).accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    private var librarySection: some View {
-        let total = count(in: category)
-        return VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    categoryTitle
-                    Spacer(minLength: 0)
-                    itemCount(total).fixedSize(horizontal: true, vertical: false)
+    private func librarySection(total: Int) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if total > 0 {
+                itemCount(total)
+            } else if category != .offline, let loadError = library.loadError {
+                ErrorNote(message: loadError)
+            } else if category == .offline, offline.busy {
+                if offline.isRestoring, offline.downloadingID == nil {
+                    AccountLoadingIndicator(title: "Loading…")
+                } else if offline.preparingID != nil, offline.downloadingID == nil {
+                    AccountLoadingIndicator(title: "Preparing download…")
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    categoryTitle
-                    itemCount(total)
-                }
+            } else if category == .offline, let error = offline.error {
+                StudioEmptyState(title: "Downloads", message: error,
+                                 actionTitle: "Browse lessons", symbol: .feed, action: discover)
+            } else if category == .offline, api.offlineOwnerID == nil, api.session == nil {
+                ConnectionPanel()
+            } else {
+                emptyLibrary
             }
             if category == .offline { DownloadAllowanceSummary() }
-            downloadStatus
-            switch category {
-            case .saved:
-                if library.favorites.isEmpty {
-                    LibraryEmptyState(title: "Build your karaoke reference library.", message: "Save tutorials as you watch. Come back to the parts you want to drill.")
-                } else {
-                    LazyVStack(spacing: 4) {
+            if category == .offline, total > 0 || offline.busy {
+                downloadStatus
+            } else if offline.downloadingID != nil {
+                Button { filter = Category.offline.rawValue } label: {
+                    HStack(spacing: 10) {
+                        Glyph(symbol: .download, size: 15, tint: MicOnStyle.accent)
+                        LocalizedText("Downloading · \(Int(offline.progress * 100))%")
+                            .font(.booth(.footnote, weight: .semibold)).monospacedDigit()
+                        Spacer(minLength: 0)
+                        Glyph(symbol: .back, size: 12, tint: MicOnStyle.secondary)
+                            .rotationEffect(.degrees(180))
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }.buttonStyle(PressStyle())
+            }
+            if total > 0 {
+                LazyVStack(spacing: 4) {
+                    switch category {
+                    case .saved:
                         ForEach(library.favorites) { clip in favoriteRow(clip) }
-                    }
-                }
-            case .offline:
-                if offline.videos.isEmpty {
-                    LibraryEmptyState(title: "Available offline",
-                                      message: "Download a lesson from its playback options to watch without a connection.")
-                } else {
-                    LazyVStack(spacing: 4) {
+                    case .offline:
                         ForEach(offline.videos) { video in downloadRow(video) }
-                    }
-                }
-            case .imports, .exports:
-                if localMovies.isEmpty {
-                    LibraryEmptyState(title: category == .exports ? "Ready for your next upload." : "Your practice, in focus.",
-                                      message: category == .exports ? "Finish a video or extract its audio in Practice. Your exports will be collected here." : "Choose your karaoke footage in Practice to keep a local working copy.")
-                } else {
-                    LazyVStack(spacing: 4) {
+                    case .imports, .exports:
                         ForEach(localMovies) { movie in movieRow(movie) }
                     }
                 }
@@ -193,15 +190,37 @@ struct LibraryView: View {
         }
     }
 
-    private var categoryTitle: some View {
-        LocalizedText(category.title).font(.booth(.title2, weight: .semibold))
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
+    @ViewBuilder private var emptyLibrary: some View {
+        switch category {
+        case .saved:
+            StudioEmptyState(title: "No favorites yet",
+                             message: "Favorite a lesson while watching to keep it here.",
+                             actionTitle: "Browse lessons", symbol: .feed, primary: true, action: discover)
+        case .offline:
+            StudioEmptyState(title: "No downloads yet",
+                             message: "Use the download button in the player to watch a lesson offline.",
+                             actionTitle: "Browse lessons", symbol: .feed, primary: true, action: discover)
+        case .imports:
+            VStack(alignment: .leading, spacing: 16) {
+                MediaTitle(title: "No imported videos yet", textStyle: .title2)
+                VideoImportControls(showingFiles: $showingFiles, onImport: playMovie, fileActionTitle: "Import a video") {
+                    EmptyView()
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .studioGlass(in: RoundedRectangle(cornerRadius: 20))
+        case .exports:
+            StudioEmptyState(title: "No exports yet",
+                             message: "Export a video or audio track to find it here.",
+                             actionTitle: "Choose a video", symbol: .edit, primary: true) { edit(nil, .export) }
+        }
     }
 
     private func itemCount(_ total: Int) -> some View {
-        LocalizedText("\(total) \(total == 1 ? "item" : "items") · On this device")
+        LocalizedText(category == .saved ? "\(total) videos" : "\(total) \(total == 1 ? "item" : "items") · On this device")
             .font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
+            .fixedSize(horizontal: false, vertical: true)
             .monospacedDigit()
     }
 
@@ -271,8 +290,12 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: 6) {
             Button { playDownload(video) } label: {
                 HStack(spacing: 12) {
-                    itemGlyph(.download)
-                    lessonTitle(video.clip)
+                    VideoFileThumbnail(url: video.url, cover: video.clip.coverURL, symbol: .download)
+                        .frame(width: 74)
+                    Text(verbatim: video.displayName)
+                        .font(.booth(.subheadline, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Glyph(symbol: .play, size: 16, tint: MicOnStyle.ink)
                         .frame(width: 34, height: 34)
                         .background(MicOnStyle.accent, in: Circle())
@@ -290,12 +313,20 @@ struct LibraryView: View {
     private func movieRow(_ movie: PracticeRecording) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 12) {
-                itemGlyph(movie.filename.hasSuffix("m4a") ? .sound : movie.isExport ? .download : .feed)
+                VideoFileThumbnail(url: library.url(for: movie), symbol: movie.isAudio ? .sound : .feed)
+                    .frame(width: 74)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: movie.title).font(.booth(.subheadline, weight: .semibold)).lineLimit(2)
-                    LocalizedDateText(date: movie.date).font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                removeButton(.close, title: "Delete local file") { removing = movie }
+                    Text(verbatim: movie.displayName)
+                        .font(.booth(.subheadline, weight: .semibold))
+                    LocalizedDateText(date: movie.date)
+                        .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if !movie.isAudio {
+                    IconButton(symbol: .play, label: "Play video") { playMovie(movie) }
+                        .studioGlass(in: Circle())
+                }
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) { movieActions(movie) }
@@ -306,19 +337,30 @@ struct LibraryView: View {
     }
 
     @ViewBuilder private func movieActions(_ movie: PracticeRecording) -> some View {
-        if movie.filename.hasSuffix("m4a") == false {
-            Button("Edit") { edit(movie) }.buttonStyle(LibraryActionStyle())
+        if !movie.isAudio {
+            Button { edit(movie, .studio) } label: { LocalizedText("Edit") }
+                .buttonStyle(LibraryActionStyle())
         }
-        Button(LocalizedStringKey(sharingMovieID == movie.id ? "Preparing export…" : "Export")) {
+        Button {
             shareMovie(movie)
-        }.buttonStyle(LibraryActionStyle()).disabled(sharingMovieID != nil)
+        } label: {
+            LocalizedText(sharingMovieID == movie.id ? "Preparing export…" : "Share")
+        }
+        .buttonStyle(LibraryActionStyle())
+        .disabled(sharingMovieID != nil)
+        removeButton(.close, title: "Delete local file") { removing = movie }
     }
 
-    private func itemGlyph(_ symbol: MicOnGlyph) -> some View {
-        Glyph(symbol: symbol, size: 19, tint: MicOnStyle.accent)
-            .frame(width: 46, height: 46)
-            .background(MicOnStyle.raised, in: Capsule())
-            .accessibilityHidden(true)
+    private func playMovie(_ movie: PracticeRecording) {
+        library.recordOpened(movie.id)
+        onOpenVideo(movie)
+        playingMovie = movie
+    }
+
+    private func openPendingEdit() {
+        guard let pendingEdit else { return }
+        self.pendingEdit = nil
+        edit(pendingEdit.movie, pendingEdit.tool)
     }
 
     private func removeButton(_ symbol: MicOnGlyph, title: String, action: @escaping () -> Void) -> some View {
@@ -399,7 +441,7 @@ struct OfflineDownloadButton: View {
                 LocalizedText("Downloading · \(Int(offline.progress * 100))%").font(.booth(.caption))
                 ActionButton(title: "Cancel download", primary: false) { Task { await offline.cancel() } }
             } else {
-                ActionButton(title: "Download for offline", primary: false) {
+                ActionButton(title: "Download to watch offline", primary: false) {
                     if quota.mayDownload(clip.id, premium: commerce.premium) {
                         Task { await offline.download(clip) }
                     } else { downloadGate = true }
@@ -496,7 +538,7 @@ struct ExportDepartureProtection: ViewModifier {
                         ScrollView {
                             VStack(spacing: 18) {
                                 LocalizedText("Stop this export?").font(.booth(.headline))
-                                LocalizedText("The export is still in progress. Leaving now cancels it. Your video stays safe.")
+                                LocalizedText("Your original video stays unchanged.")
                                     .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 ActionButton(title: "Keep exporting", action: departure.keepWorking)
@@ -515,16 +557,19 @@ struct ExportDepartureProtection: ViewModifier {
 struct DownloadCompletionNotice: View {
     @EnvironmentObject private var offline: OfflineStore
     @EnvironmentObject private var library: LibraryStore
+    @Environment(\.locale) private var locale
     var body: some View {
         Group {
             if offline.completedDownloadID != nil {
                 HStack(spacing: 12) {
-                    LocalizedText("Downloaded. Watch offline in Library.")
+                    LocalizedText("Ready to watch offline")
                         .font(.booth(.caption)).fixedSize(horizontal: false, vertical: true)
-                    Button("View") {
+                    Button {
                         offline.completedDownloadID = nil
                         library.openDownloads()
-                    }.buttonStyle(CompactActionStyle())
+                    } label: { LocalizedText("View") }
+                        .buttonStyle(CompactActionStyle())
+                        .accessibilityLabel(Text(verbatim: L10n.text("View downloads", language: AppLanguage.from(locale))))
                     IconButton(symbol: .close, label: "Dismiss message") { offline.completedDownloadID = nil }
                 }.padding(12).foregroundStyle(MicOnStyle.paper)
                     .background { BoothSurface(tone: .plum) }
@@ -560,7 +605,7 @@ private struct OfflineExportButton: View {
                          primary: false, busy: exportTask != nil, action: startExport)
                 .accessibilityIdentifier("player.exportVideo")
             if !clip.playbackURL.isFileURL, offline.cached(clip.id) == nil {
-                LocalizedText("We download the video before exporting. Existing downloads are reused.")
+                LocalizedText("Export uses your saved download when available. Otherwise, MicOn downloads the video first.")
                     .font(.booth(.caption)).foregroundStyle(MicOnStyle.secondary)
                 DownloadAllowanceSummary()
             }
@@ -579,7 +624,10 @@ private struct OfflineExportButton: View {
 
     private func startExport() {
         guard exportTask == nil else { return }
-        guard commerce.canExportMedia else { downloadGate = true; return }
+        guard commerce.canExportMedia, let owner = commerce.api.session?.userId.value else {
+            downloadGate = true
+            return
+        }
         if !clip.playbackURL.isFileURL, offline.cached(clip.id) == nil,
            !quota.mayDownload(clip.id, premium: commerce.premium) {
             downloadGate = true
@@ -651,8 +699,10 @@ private struct OfflineExportButton: View {
                     output = destination
                 }
                 try Task.checkCancellation()
-                try commerce.requireMediaExport()
-                let recording = try await library.importMovie(output, exported: true, title: clip.title)
+                let recording = try await library.importMovie(output, exported: true, title: clip.title) {
+                    try commerce.requireMediaExport()
+                    guard commerce.api.session?.userId.value == owner else { throw MicOnError.unauthorized }
+                }
                 let url = try await library.shareFile(for: recording, commerce: commerce)
                 exportedFile = url
                 if !Task.isCancelled { sharing = SharedFile(url: url) }
@@ -690,17 +740,5 @@ struct DownloadAllowanceSummary: View {
             .onAppear { quota.resetIfNeeded() }
             .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { _ in quota.resetIfNeeded() }
             .sheet(isPresented: $showingReward) { MembershipView(rewardKind: .download) }
-    }
-}
-
-private struct LibraryEmptyState: View {
-    let title: String
-    let message: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LocalizedText(title).font(.booth(.headline))
-            LocalizedText(message).font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-        }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
     }
 }

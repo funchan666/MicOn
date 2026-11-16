@@ -119,14 +119,17 @@ struct LessonFeedPage: Decodable {
 struct RecommendedLesson: Decodable {
     let videoId: ServiceID
     let shortLink: String?
-    let m3u8Url: String
+    let m3u8Url: String?
     let videoName: String?
     let coverUrl: String?
-    // Optional original-file fields, when supplied. HLS remains the playback source.
+    // Prefer HLS and use the supplied file when the response has no usable HLS address.
     let fileUrl: String?
     let originUrl: String?
     var clip: LessonClip? {
-        guard !videoId.value.isEmpty, let url = WebAddress.media(m3u8Url) else { return nil }
+        guard !videoId.value.isEmpty,
+              let url = WebAddress.media(m3u8Url) ?? WebAddress.media(fileUrl) ?? WebAddress.media(originUrl) else {
+            return nil
+        }
         return LessonClip(id: videoId.value, title: videoName?.nilIfBlank ?? "Untitled clip", playbackURL: url,
                     coverURL: WebAddress.media(coverUrl), shortLink: shortLink, channel: "Discover", duration: nil,
                     exportSources: [fileUrl, originUrl].compactMap { WebAddress.media($0) })
@@ -155,6 +158,14 @@ struct PracticeRecording: Codable, Identifiable, Hashable {
     var title: String
     let date: Date
     let isExport: Bool
+    var lastOpenedAt: Date? = nil
+
+    var fileExtension: String { (filename as NSString).pathExtension.lowercased() }
+    var isAudio: Bool { fileExtension == "m4a" }
+    var displayName: String {
+        guard !fileExtension.isEmpty, !title.lowercased().hasSuffix("." + fileExtension) else { return title }
+        return title + "." + fileExtension
+    }
 }
 struct LessonLibrarySnapshot: Codable {
     var favorites: [LessonClip] = []
@@ -195,8 +206,9 @@ enum WebAddress {
         return value
     }
     static func media(_ raw: String?) -> URL? {
-        guard let raw, let url = URL(string: raw),
-              ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
+        guard let address = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty,
+              let url = URL(string: address), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              let host = url.host, !host.isEmpty else { return nil }
         return url
     }
 }

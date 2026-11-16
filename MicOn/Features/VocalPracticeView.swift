@@ -5,18 +5,17 @@ struct VocalPracticeEntry: View {
 
     var body: some View {
         Button(action: openJournal) {
-            HStack(alignment: .center, spacing: 16) {
-                MicOnIllustration(name: "PracticeHero", height: 70).frame(width: 70)
-                    .clipShape(.rect(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 13) {
+                Glyph(symbol: .edit, size: 19, tint: MicOnStyle.accent).frame(width: 28)
+                VStack(alignment: .leading, spacing: 4) {
                     LocalizedText("Singing log").font(.booth(.headline))
-                    LocalizedText("Keep a record of phrasing, key and how each take felt.").font(.booth(.subheadline))
-                        .foregroundStyle(MicOnStyle.secondary)
+                    LocalizedText("Log the song section, key and how each take went.")
+                        .font(.booth(.footnote)).foregroundStyle(MicOnStyle.secondary)
                 }.fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                Glyph(symbol: .back, size: 12, tint: MicOnStyle.accent).rotationEffect(.degrees(180))
+            }.padding(.vertical, 12).frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
                 .foregroundStyle(MicOnStyle.paper)
-                .background { BoothSurface(tone: .plum) }
                 .contentShape(Rectangle())
         }.buttonStyle(PressStyle()).accessibilityIdentifier("practice.openJournal")
     }
@@ -38,39 +37,43 @@ struct VocalPracticeView: View {
     @State private var sharedExport: SharedFile?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer(minLength: 0)
-                IconButton(symbol: .close, label: "Close") { dismiss() }
-                    .studioGlass(in: Circle())
-            }.padding(.horizontal, 20).padding(.top, 5)
-            ScrollView {
-                VStack(spacing: 0) {
-                    StudioCover(artwork: "JournalCover", height: 162...290, ratio: 1.46) {
-                        CoverTitle(title: "Singing log", size: 56)
-                    }
-                    VStack(alignment: .leading, spacing: 18) {
-                        ChoiceStrip(values: ["Practice", "Sessions"], selected: history ? "Sessions" : "Practice") {
-                            history = $0 == "Sessions"
-                        }
-                        if let message = journal.storageMessage { ErrorNote(message: message) }
-                        if history { sessions }
-                        else if let session = journal.activeSession { practice(session) }
-                        else { start }
-                    }.miconPage()
+        ScrollView {
+            VStack(spacing: 0) {
+                StudioCover(artwork: "JournalCover", height: 130...196, ratio: 1.86,
+                            backdrop: MicOnStyle.mediaBackground, artworkSaturation: 0.45) {
+                    CoverTitle(title: "Singing log", size: 48).padding(.top, 50)
                 }
-            }.scrollClipDisabled().scrollDismissesKeyboard(.interactively)
-        }.miconScreenBackground().foregroundStyle(MicOnStyle.paper)
+                VStack(alignment: .leading, spacing: 18) {
+                    ChoiceStrip(values: ["Practice", "Sessions"], selected: history ? "Sessions" : "Practice") {
+                        history = $0 == "Sessions"
+                    }
+                    if let message = journal.storageMessage { ErrorNote(message: message) }
+                    if history { sessions }
+                    else if let session = journal.activeSession { practice(session) }
+                    else { start }
+                }.studioPage()
+            }
+        }.scrollClipDisabled().scrollDismissesKeyboard(.interactively)
+            .studioCoverControl { IconButton(symbol: .close, label: "Close") { dismiss() } }
+            .miconScreenBackground(MicOnStyle.mediaBackground).foregroundStyle(MicOnStyle.paper)
             .sheet(item: $selectedSession) { session in sessionDetail(session) }
     }
 
     private var start: some View {
         VStack(alignment: .leading, spacing: 16) {
-            LocalizedText("Work on one phrase at a time and remember the key that felt comfortable.")
-                .font(.booth(.subheadline)).foregroundStyle(MicOnStyle.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            TextField("Song or phrase name", text: $title).submitLabel(.done).miconField()
-            ActionButton(title: "Start a song session") {
+            VStack(alignment: .leading, spacing: 8) {
+                CoverTitle(title: "New practice session", size: 39, textStyle: .title)
+                LocalizedText("Start with a short phrase and note which key feels comfortable.")
+                    .font(.booth(.body)).foregroundStyle(MicOnStyle.secondary)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            }
+            TextField(L10n.text("Song or phrase (optional)", language: AppLanguage.from(locale)), text: $title)
+                .submitLabel(.done)
+                .font(.booth(.body)).foregroundStyle(MicOnStyle.paper)
+                .tint(MicOnStyle.accent)
+                .padding(14).frame(minHeight: 48)
+                .studioGlass(in: RoundedRectangle(cornerRadius: 14))
+            ActionButton(title: "Start practice") {
                 if journal.beginSession(title: title) { title = "" }
             }.disabled(!journal.available)
         }
@@ -79,7 +82,7 @@ struct VocalPracticeView: View {
     private func practice(_ session: VocalPracticeSession) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             sessionTitle(session).font(.booth(.title3, display: true))
-            LocalizedText("Choose the song section and note your karaoke player's key adjustment. Mark what you hear on playback.").font(.booth(.subheadline))
+            LocalizedText("Log the key change you made in your karaoke player. Listen back before marking the take.").font(.booth(.subheadline))
                 .foregroundStyle(MicOnStyle.secondary)
             LocalizedText("Song section").font(.booth(.headline))
             ChoiceStrip(values: VocalSection.allCases.map(\.label), selected: section.label) { label in
@@ -94,7 +97,7 @@ struct VocalPracticeView: View {
                 LocalizedText(withBacking ? "With backing track" : "Voice only")
             }.buttonStyle(CompactActionStyle())
                 .accessibilityAddTraits(withBacking ? .isSelected : [])
-            TextField("Take note (optional)", text: $note, axis: .vertical)
+            TextField(L10n.text("Take note (optional)", language: AppLanguage.from(locale)), text: $note, axis: .vertical)
                 .lineLimit(2...5).miconField()
             LocalizedText("How did that take go?").font(.booth(.headline))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 10)], spacing: 10) {
@@ -129,8 +132,12 @@ struct VocalPracticeView: View {
     }
 
     @ViewBuilder private var sessions: some View {
-        if journal.completedSessions.isEmpty {
-            MessagePanel(title: "No finished sessions", message: "Finish a practice session to review its takes here.")
+        if journal.completedSessions.isEmpty, journal.available {
+            StudioEmptyState(title: "No completed sessions",
+                             message: "Once you finish a session, its takes and notes appear here.",
+                             actionTitle: "Back to practice", symbol: .edit) {
+                history = false
+            }.accessibilityIdentifier("practice.emptySessions")
         }
         ForEach(journal.completedSessions) { session in
             Button { selectedSession = session } label: {
@@ -165,7 +172,7 @@ struct VocalPracticeView: View {
         }.miconScreenBackground()
             .sheet(item: $sharedExport) { ShareSheet(items: [$0.url]) }
             .fullScreenCover(isPresented: $showingRemoval) {
-                AccountDecisionDialog(title: "Delete session?", message: "This removes the session and its take notes.",
+                AccountDecisionDialog(title: "Delete session?", message: "This deletes the session, including its takes and notes.",
                     confirmTitle: "Delete session", destructive: true, cancel: { showingRemoval = false }) {
                         showingRemoval = false
                         if journal.removeSession(session.id) { selectedSession = nil }
